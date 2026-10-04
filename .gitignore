@@ -1,0 +1,20 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local databases & logs
+*.db
+*.log
+
+# Output & Upload Directories
+data/
+reports/
+dist/
+node_modules/
+
+# Environment
+.env
+.venv/
+env/
+venv/

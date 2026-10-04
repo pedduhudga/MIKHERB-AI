@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: mikherb_postgres
+    environment:
+      POSTGRES_DB: mikherb_db
+      POSTGRES_USER: mikherb
+      POSTGRES_PASSWORD: mikherb_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: mikherb_api
+    environment:
+      - DATABASE_URL=postgresql://mikherb:mikherb_password@postgres:5432/mikherb_db
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: mikherb_frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
