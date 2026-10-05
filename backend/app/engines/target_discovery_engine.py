@@ -254,57 +254,201 @@ TARGET_CATALOGUE = [
 
 
 # ---------------------------------------------------------------------------
+# Target Gene Keywords for Cross-Validation
+# ---------------------------------------------------------------------------
+
+TARGET_GENE_KEYWORDS: Dict[str, List[str]] = {
+    "ALS":    ["als", "ahas", "acetolactate", "acetohydroxyacid", "ilvh", "ilvg", "ilvm"],
+    "HPPD":   ["hppd", "hydroxyphenylpyruvate", "4-hppd"],
+    "PPO":    ["ppo", "protox", "protoporphyrinogen"],
+    "EPSPS":  ["epsps", "arog", "shikimate", "enolpyruvyl"],
+    "ACCase": ["accase", "acc", "carboxylase", "biotin carboxylase", "acc1", "acc2"],
+    "psbA":   ["psba", "d1", "photosystem ii", "reaction center", "reaction centre"],
+    "PDS":    ["pds", "phytoene desaturase", "phytoene dehydrogenase"],
+    "KAS":    ["kas", "ketoacyl", "fatty acid", "fabh", "fabf", "vlcfa", "condensing enzyme"],
+    "GS":     ["gs", "gln", "glutamine synthetase", "glna", "glutamate--ammonia"],
+    "DXS":    ["dxs", "xylulose", "1-deoxy-d-xylulose", "mep", "clostridial"]
+}
+
+# ---------------------------------------------------------------------------
+# Explicit Species-Specific Essentiality Registry
+# ---------------------------------------------------------------------------
+
+ESSENTIALITY_EVIDENCE_REGISTRY: Dict[Tuple[str, str], Dict[str, Any]] = {
+    ("ALS", "amaranthus palmeri"): {
+        "target": "ALS",
+        "species": "Amaranthus palmeri",
+        "evidence_level": "SPECIES_SPECIFIC",
+        "evidence_type": "CHEMICAL_GENETICS_AND_RESISTANCE_MUTATION",
+        "source": "Weed Science Society of America (WSSA) / HRAC",
+        "source_url": "https://weedscience.org",
+        "publication": "Tranel & Wright (2002) Weed Sci 50:700-706",
+        "evidence_summary": "In vivo ALS inhibition by multiple herbicide chemistries causes rapid plant death; Trp574Leu/Ser653Asn mutations restore viability.",
+    },
+    ("EPSPS", "amaranthus palmeri"): {
+        "target": "EPSPS",
+        "species": "Amaranthus palmeri",
+        "evidence_level": "SPECIES_SPECIFIC",
+        "evidence_type": "GENE_AMPLIFICATION_AND_SURVIVAL_ASSAY",
+        "source": "Proceedings of the National Academy of Sciences",
+        "source_url": "https://doi.org/10.1073/pnas.0909012107",
+        "publication": "Gaines et al. (2010) PNAS 107(3):1029-1034",
+        "evidence_summary": "EPSPS gene amplification directly dictates glyphosate lethal dose; absolute plant lethality upon target inhibition in sensitive biotypes.",
+    },
+    ("PPO", "amaranthus palmeri"): {
+        "target": "PPO",
+        "species": "Amaranthus palmeri",
+        "evidence_level": "SPECIES_SPECIFIC",
+        "evidence_type": "TARGET_DELETION_RESISTANCE_MUTATION",
+        "source": "Pest Management Science",
+        "source_url": "https://doi.org/10.1002/ps.4082",
+        "publication": "Salas et al. (2016) Pest Manag Sci 72(4):664-671",
+        "evidence_summary": "Gly210 deletion specifically prevents peroxidative lipid destruction and chlorosis, confirming in-weed target lethality.",
+    },
+}
+
+
+# ---------------------------------------------------------------------------
 # UniProt verification, search, and structure helpers
 # ---------------------------------------------------------------------------
 
 def _verify_uniprot_accession(accession: str, expected_gene: str, expected_species: str, timeout: int = 8) -> Dict[str, Any]:
     """
-    Verifies that a UniProt accession exists, is active, and matches the expected species.
+    Verifies that a UniProt accession exists, is active, matches the expected species,
+    matches the expected gene, and represents the correct biological target function.
+
     Returns:
-        status: "VERIFIED", "INVALID", or "CURATED_UNVERIFIED"
+        organism_verified: bool
+        gene_verified: bool
+        function_verified: bool
+        provenance_status: "VERIFIED", "INVALID", or "CURATED_UNVERIFIED"
+        status: backwards-compatible alias for provenance_status
         reviewed: bool (True for Swiss-Prot, False for TrEMBL)
         organism_scientific: str or None
         reason: str or None
     """
     if not accession:
-        return {"status": "INVALID", "reviewed": False, "organism_scientific": None, "reason": "EMPTY_ACCESSION"}
+        return {
+            "status": "INVALID",
+            "provenance_status": "INVALID",
+            "organism_verified": False,
+            "gene_verified": False,
+            "function_verified": False,
+            "reviewed": False,
+            "organism_scientific": None,
+            "reason": "EMPTY_ACCESSION"
+        }
 
     try:
         url = f"https://rest.uniprot.org/uniprotkb/{accession.strip().upper()}.json"
         resp = requests.get(url, timeout=timeout)
         if resp.status_code == 404:
-            return {"status": "INVALID", "reviewed": False, "organism_scientific": None, "reason": "ACCESSION_NOT_FOUND"}
+            return {
+                "status": "INVALID",
+                "provenance_status": "INVALID",
+                "organism_verified": False,
+                "gene_verified": False,
+                "function_verified": False,
+                "reviewed": False,
+                "organism_scientific": None,
+                "reason": "ACCESSION_NOT_FOUND"
+            }
         if resp.status_code != 200:
-            return {"status": "CURATED_UNVERIFIED", "reviewed": False, "organism_scientific": None, "reason": f"HTTP_{resp.status_code}"}
+            return {
+                "status": "CURATED_UNVERIFIED",
+                "provenance_status": "CURATED_UNVERIFIED",
+                "organism_verified": False,
+                "gene_verified": False,
+                "function_verified": False,
+                "reviewed": False,
+                "organism_scientific": None,
+                "reason": f"HTTP_{resp.status_code}"
+            }
 
         data = resp.json()
         if data.get("entryType") == "Inactive":
-            return {"status": "INVALID", "reviewed": False, "organism_scientific": None, "reason": "ENTRY_INACTIVE"}
+            return {
+                "status": "INVALID",
+                "provenance_status": "INVALID",
+                "organism_verified": False,
+                "gene_verified": False,
+                "function_verified": False,
+                "reviewed": False,
+                "organism_scientific": None,
+                "reason": "ENTRY_INACTIVE"
+            }
 
         entry_type_str = data.get("entryType", "")
         is_reviewed = ("Swiss-Prot" in entry_type_str) or ("reviewed" in entry_type_str.lower() and "unreviewed" not in entry_type_str.lower())
 
+        # 1. Scientific Organism Verification
         org_sci = data.get("organism", {}).get("scientificName", "").lower()
         org_common = data.get("organism", {}).get("commonName", "").lower()
         expected_tokens = [tok.strip().lower() for tok in expected_species.split() if len(tok) > 2]
-        species_matched = any(tok in org_sci or tok in org_common for tok in expected_tokens) if expected_tokens else True
+        organism_verified = any(tok in org_sci or tok in org_common for tok in expected_tokens) if expected_tokens else True
 
-        if not species_matched:
-            return {
-                "status": "INVALID",
-                "reviewed": is_reviewed,
-                "organism_scientific": data.get("organism", {}).get("scientificName"),
-                "reason": f"ORGANISM_MISMATCH: expected '{expected_species}', found '{org_sci}'"
-            }
+        # 2. Gene Name Verification
+        gene_names: List[str] = []
+        for g in data.get("genes", []):
+            if g.get("geneName", {}).get("value"):
+                gene_names.append(g["geneName"]["value"].lower())
+            for syn in g.get("synonyms", []):
+                if syn.get("value"):
+                    gene_names.append(syn["value"].lower())
+            for ol in g.get("orderedLocusNames", []):
+                if ol.get("value"):
+                    gene_names.append(ol["value"].lower())
+
+        # 3. Protein Function / Description Verification
+        full_names: List[str] = []
+        rec = data.get("proteinDescription", {}).get("recommendedName", {}).get("fullName", {}).get("value")
+        if rec:
+            full_names.append(rec.lower())
+        for sub in data.get("proteinDescription", {}).get("submissionNames", []):
+            if sub.get("fullName", {}).get("value"):
+                full_names.append(sub["fullName"]["value"].lower())
+        for alt in data.get("proteinDescription", {}).get("alternativeNames", []):
+            if alt.get("fullName", {}).get("value"):
+                full_names.append(alt["fullName"]["value"].lower())
+
+        kw_list = TARGET_GENE_KEYWORDS.get(expected_gene, [expected_gene.lower()])
+        gene_verified = any(any(kw in gn for kw in kw_list) for gn in gene_names) or any(any(kw in fn for kw in kw_list) for fn in full_names)
+        function_verified = any(any(kw in fn for kw in kw_list) for fn in full_names) or gene_verified
+
+        if not organism_verified:
+            reason = f"ORGANISM_MISMATCH: expected '{expected_species}', found '{org_sci}'"
+            status = "INVALID"
+        elif not gene_verified:
+            reason = f"GENE_MISMATCH: expected '{expected_gene}', found genes {gene_names}"
+            status = "INVALID"
+        elif not function_verified:
+            reason = f"FUNCTION_MISMATCH: expected target {expected_gene}, found '{full_names}'"
+            status = "INVALID"
+        else:
+            reason = None
+            status = "VERIFIED"
 
         return {
-            "status": "VERIFIED",
+            "status": status,
+            "provenance_status": status,
+            "organism_verified": organism_verified,
+            "gene_verified": gene_verified,
+            "function_verified": function_verified,
             "reviewed": is_reviewed,
             "organism_scientific": data.get("organism", {}).get("scientificName"),
-            "reason": None
+            "reason": reason
         }
     except Exception as e:
-        return {"status": "CURATED_UNVERIFIED", "reviewed": False, "organism_scientific": None, "reason": str(e)}
+        return {
+            "status": "CURATED_UNVERIFIED",
+            "provenance_status": "CURATED_UNVERIFIED",
+            "organism_verified": False,
+            "gene_verified": False,
+            "function_verified": False,
+            "reviewed": False,
+            "organism_scientific": None,
+            "reason": str(e)
+        }
 
 def _search_uniprot(species_name: str, gene: str, timeout: int = 10) -> Optional[str]:
     """Search UniProt for a given species + gene; return first active primaryAccession or None."""
@@ -600,19 +744,23 @@ class MultiTargetDiscoveryEngine:
         essentiality_evidence = target_def.get("essentiality_evidence", "No evidence recorded.")
         essentiality_source = target_def.get("essentiality_source", "Curated Catalogue")
 
-        # Determine evidence level: species-specific vs general plant vs preclinical
+        # Determine evidence level: requires explicit empirical species-specific evidence in registry
         target_present_in_weed = (weed_accession is not None or weed_seq is not None)
         species_specific_essentiality = False
-        if target_present_in_weed:
-            if gene in ("ALS", "EPSPS", "PPO", "ACCase") and "amaranthus" in weed_canonical:
-                essentiality_evidence_level = "SPECIES_SPECIFIC"
-                species_specific_essentiality = True
-            elif gene in ("DXS",):
-                essentiality_evidence_level = "PRECLINICAL_HYPOTHESIS"
-            else:
-                essentiality_evidence_level = "GENERAL_PLANT_EVIDENCE"
-        else:
+        evidence_registry_key = (gene, weed_canonical)
+        evidence_record = ESSENTIALITY_EVIDENCE_REGISTRY.get(evidence_registry_key)
+
+        if not target_present_in_weed:
             essentiality_evidence_level = "UNKNOWN"
+        elif evidence_record is not None and evidence_record.get("evidence_level") == "SPECIES_SPECIFIC":
+            essentiality_evidence_level = "SPECIES_SPECIFIC"
+            species_specific_essentiality = True
+            essentiality_evidence = evidence_record.get("evidence_summary", essentiality_evidence)
+            essentiality_source = f"{evidence_record.get('source')} ({evidence_record.get('publication')})"
+        elif gene in ("DXS",):
+            essentiality_evidence_level = "PRECLINICAL_HYPOTHESIS"
+        else:
+            essentiality_evidence_level = "GENERAL_PLANT_EVIDENCE"
 
         # Essentiality score: requires target presence in weed
         essentiality_score = self._score_essentiality(
@@ -635,7 +783,9 @@ class MultiTargetDiscoveryEngine:
             resistance_known=target_def.get("resistance_known", False),
             herbicide_classes_count=len(target_def.get("herbicide_classes", []))
         )
-        target_evidence_confidence = self._compute_target_evidence_confidence(target_evidence_score, weed_seq is not None, alphafold_available)
+        target_evidence_confidence = self._compute_target_evidence_confidence(
+            target_evidence_score, weed_seq is not None, alphafold_available and plddt_avg is not None
+        )
 
         # Target Opportunity Score (measures actionable discovery suitability)
         target_opportunity_score = self._compute_opportunity_score(
@@ -724,7 +874,7 @@ class MultiTargetDiscoveryEngine:
         If no weed accession or sequence exists, returns None rather than manufacturing 90.0.
 
         Distinguishes:
-          - SPECIES_SPECIFIC: Target essentiality confirmed in this specific weed species.
+          - SPECIES_SPECIFIC: Target essentiality confirmed in this specific weed species via empirical evidence.
           - GENERAL_PLANT_EVIDENCE: Essential in plant kingdom, but species-specific trial data not yet published.
           - PRECLINICAL_HYPOTHESIS: Experimental pathway target.
         """
@@ -765,10 +915,12 @@ class MultiTargetDiscoveryEngine:
 
     @staticmethod
     def _score_structure(alphafold_available: bool, plddt: Optional[float]) -> Optional[float]:
-        if not alphafold_available:
+        """
+        Structure score is derived strictly from real pLDDT.
+        If AlphaFold is unavailable OR pLDDT is missing, returns None. Never fabricates 50.0.
+        """
+        if not alphafold_available or plddt is None:
             return None
-        if plddt is None:
-            return 50.0
         return round(min(100.0, max(0.0, plddt)), 1)
 
     @staticmethod
@@ -787,7 +939,8 @@ class MultiTargetDiscoveryEngine:
         Max 100.0.
           - Weed accession verified: 20
           - Weed sequence retrieved: 20
-          - AlphaFold structure available: 20 (scaled by pLDDT if present)
+          - AlphaFold structure available with verified pLDDT: 20 * (plddt / 100.0)
+            (If plddt is unavailable, contributes 0.0 — no fabricated 0.7 factor)
           - Crop homolog accession: 15
           - Pairwise sequence alignment computed: 10
           - Commercial herbicide chemical matter: up to 10
@@ -798,9 +951,9 @@ class MultiTargetDiscoveryEngine:
             score += 20.0
         if has_weed_seq:
             score += 20.0
-        if alphafold_available:
-            factor = (plddt_avg / 100.0) if (plddt_avg is not None) else 0.7
-            score += 20.0 * max(0.5, min(1.0, factor))
+        if alphafold_available and plddt_avg is not None:
+            factor = (plddt_avg / 100.0)
+            score += 20.0 * max(0.0, min(1.0, factor))
         if has_crop_homolog:
             score += 15.0
         if has_alignment:

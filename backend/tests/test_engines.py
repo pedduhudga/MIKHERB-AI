@@ -425,9 +425,21 @@ def test_target_discovery_alignment_failure_handling():
 
 def test_target_discovery_provenance_records_present():
     """Curated accessions must provide structured provenance metadata records with verification."""
-    engine = MultiTargetDiscoveryEngine(crop_species="Soybean")
-    record = engine._assess_single_target("Palmer Amaranth", TARGET_CATALOGUE[0])
-    prov = record.get("weed_accession_provenance")
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "entryType": "UniProtKB unreviewed (TrEMBL)",
+        "organism": {"scientificName": "Amaranthus palmeri"},
+        "genes": [{"geneName": {"value": "ALS"}}],
+        "proteinDescription": {"recommendedName": {"fullName": {"value": "Acetolactate synthase"}}}
+    }
+    with patch("requests.get", return_value=mock_resp), \
+         patch("app.engines.target_discovery_engine._check_alphafold_available", return_value=(True, 94.0)), \
+         patch("app.engines.target_discovery_engine._fetch_fasta_seq", return_value="MAATVSFGKL"):
+
+        engine = MultiTargetDiscoveryEngine(crop_species="Soybean")
+        record = engine._assess_single_target("Palmer Amaranth", TARGET_CATALOGUE[0])
+        prov = record.get("weed_accession_provenance")
 
     assert prov is not None
     assert prov["accession"] == "A0A890DLI3"
@@ -441,17 +453,97 @@ def test_target_discovery_provenance_records_present():
 def test_target_discovery_uniprot_accession_verification_invalid():
     """Accession verification must flag organism mismatches as INVALID and reject poisoned accessions."""
     from app.engines.target_discovery_engine import _verify_uniprot_accession
-    # P17597 is Arabidopsis thaliana ALS, not Zea mays
     mock_resp = MagicMock()
     mock_resp.status_code = 200
     mock_resp.json.return_value = {
         "entryType": "UniProtKB reviewed (Swiss-Prot)",
-        "organism": {"scientificName": "Arabidopsis thaliana"}
+        "organism": {"scientificName": "Arabidopsis thaliana"},
+        "genes": [{"geneName": {"value": "ALS"}}],
+        "proteinDescription": {"recommendedName": {"fullName": {"value": "Acetolactate synthase"}}}
     }
     with patch("requests.get", return_value=mock_resp):
         v_res = _verify_uniprot_accession("P17597", "ALS", "Zea mays")
         assert v_res["status"] == "INVALID"
+        assert v_res["provenance_status"] == "INVALID"
+        assert v_res["organism_verified"] is False
         assert "ORGANISM_MISMATCH" in v_res["reason"]
+
+
+def test_target_discovery_uniprot_accession_verification_gene_mismatch():
+    """Accession verification must flag gene mismatches as INVALID even when organism matches."""
+    from app.engines.target_discovery_engine import _verify_uniprot_accession
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "entryType": "UniProtKB reviewed (Swiss-Prot)",
+        "organism": {"scientificName": "Arabidopsis thaliana"},
+        "genes": [{"geneName": {"value": "HPPD"}}],
+        "proteinDescription": {"recommendedName": {"fullName": {"value": "4-hydroxyphenylpyruvate dioxygenase"}}}
+    }
+    with patch("requests.get", return_value=mock_resp):
+        v_res = _verify_uniprot_accession("P93836", "ALS", "Arabidopsis thaliana")
+        assert v_res["status"] == "INVALID"
+        assert v_res["gene_verified"] is False
+        assert "GENE_MISMATCH" in v_res["reason"]
+
+
+def test_target_discovery_uniprot_accession_verification_function_mismatch():
+    """Accession verification must flag functional description mismatches as INVALID."""
+    from app.engines.target_discovery_engine import _verify_uniprot_accession
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "entryType": "UniProtKB reviewed (Swiss-Prot)",
+        "organism": {"scientificName": "Arabidopsis thaliana"},
+        "genes": [],
+        "proteinDescription": {"recommendedName": {"fullName": {"value": "Histone H3"}}}
+    }
+    with patch("requests.get", return_value=mock_resp):
+        v_res = _verify_uniprot_accession("P17597", "ALS", "Arabidopsis thaliana")
+        assert v_res["status"] == "INVALID"
+        assert v_res["function_verified"] is False
+
+
+def test_target_discovery_missing_plddt_never_manufactures_score():
+    """Missing pLDDT must produce None for structure_score and 0 for AlphaFold evidence contribution (never 50.0 or 0.7)."""
+    engine = MultiTargetDiscoveryEngine()
+    # 1. Structure score must be None
+    struct_score = engine._score_structure(alphafold_available=True, plddt=None)
+    assert struct_score is None, "Missing pLDDT must yield None structure score, not 50.0."
+
+    # 2. Evidence score must not fabricate 0.7 factor
+    ev_score_without_plddt = engine._compute_target_evidence_score(
+        has_weed_accession=True,
+        has_weed_seq=True,
+        alphafold_available=True,
+        plddt_avg=None,
+        has_crop_homolog=False,
+        has_alignment=False,
+        resistance_known=False,
+        herbicide_classes_count=0
+    )
+    # Weed accession (20) + weed sequence (20) = 40.0; AlphaFold with None pLDDT contributes 0.0
+    assert ev_score_without_plddt == 40.0
+
+
+def test_target_discovery_species_specific_essentiality_requires_registry():
+    """Species-specific essentiality must require explicit empirical registry record, not merely Amaranthus presence."""
+    engine = MultiTargetDiscoveryEngine()
+
+    # Case 1: ALS in Amaranthus palmeri has an explicit registry record -> SPECIES_SPECIFIC
+    with patch("app.engines.target_discovery_engine._verify_uniprot_accession", return_value={"status": "VERIFIED", "reviewed": False}), \
+         patch("app.engines.target_discovery_engine._fetch_fasta_seq", return_value="MAATVS"):
+        als_record = engine._assess_single_target("Amaranthus palmeri", TARGET_CATALOGUE[0])
+    assert als_record["essentiality_evidence_level"] == "SPECIES_SPECIFIC"
+    assert als_record["species_specific_essentiality"] is True
+
+    # Case 2: psbA in Amaranthus palmeri has target present, but NO species-specific essentiality record in registry
+    with patch("app.engines.target_discovery_engine._verify_uniprot_accession", return_value={"status": "VERIFIED", "reviewed": False}), \
+         patch("app.engines.target_discovery_engine._fetch_fasta_seq", return_value="MTIAV"):
+        psba_def = next(t for t in TARGET_CATALOGUE if t["gene"] == "psbA")
+        psba_record = engine._assess_single_target("Amaranthus palmeri", psba_def)
+    assert psba_record["essentiality_evidence_level"] == "GENERAL_PLANT_EVIDENCE"
+    assert psba_record["species_specific_essentiality"] is False
 
 
 def test_target_discovery_species_specific_essentiality_stratification():
