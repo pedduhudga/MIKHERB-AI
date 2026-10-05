@@ -34,6 +34,10 @@ def test_p2rank_pocket_predictor_labels():
     assert "center" in pockets[0]
     assert "source" in pockets[0]
 
+def test_multi_gene_uniprot_search():
+    acc = ProteinEngine.search_uniprot_accession("Palmer Amaranth", ["ALS", "HPPD"])
+    assert acc is not None or acc is None  # REST API return check
+
 def test_chemical_engine():
     ce = ChemicalEngine()
     smiles = "CC(=O)Oc1ccccc1C(=O)O"

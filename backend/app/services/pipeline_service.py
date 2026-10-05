@@ -362,15 +362,17 @@ class DiscoveryPipelineRunner:
             for comp in compounds:
                 logkoc = round(0.81 * (comp.logp or 2.0) + 0.10, 2) if comp.logp is not None else None
                 aquatic_mobility = ("HIGH" if logkoc < 2.0 else "MODERATE") if logkoc is not None else "UNKNOWN"
-                safety_clean = (aquatic_mobility != "HIGH") and comp.lipinski_pass
                 safety_records.append({
                     "compound_code": comp.compound_code,
+                    "safety_status": "PREDICTIVE_SCREEN_ONLY",
+                    "experimental_safety": "UNKNOWN_REQUIRES_ASSAY",
                     "mammalian_toxicity": "UNKNOWN_REQUIRES_ASSAY",
-                    "aquatic_mobility_LogKoc": logkoc,
-                    "aquatic_mobility_class": aquatic_mobility,
                     "bee_pollinator_concern": "UNKNOWN_NO_PUBLIC_ALERT",
-                    "known_pesticide_similarity": round(comp.novelty_score, 1) if comp.novelty_score is not None else None,
-                    "safety_clean": safety_clean
+                    "aquatic_mobility_LogKoc_prediction": logkoc,
+                    "aquatic_mobility_class": aquatic_mobility,
+                    "structural_dissimilarity": round(comp.novelty_score, 1) if comp.novelty_score is not None else None,
+                    "evidence_level": "PREDICTED_HEURISTIC",
+                    "safety_clean": (aquatic_mobility != "HIGH") and comp.lipinski_pass
                 })
             return {"safety_screened": len(compounds), "safety_records": safety_records}
 
