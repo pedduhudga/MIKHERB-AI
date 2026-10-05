@@ -137,8 +137,10 @@ class Candidate(Base):
     evidence_level = Column(Integer, default=0)
 
     # Predictions & Docking scores
+    boltz_status = Column(String, nullable=True)  # COMPLETED, NOT_INSTALLED, FAILED_EXECUTION, FAILED_OUTPUT_PARSE, POCKET_CENTER_MISSING, NOT_AVAILABLE
     boltz_affinity_score = Column(Float, nullable=True)  # pKd / pKi or affinity metric
     boltz_confidence = Column(Float, nullable=True)
+    gnina_status = Column(String, nullable=True)  # COMPLETED, NOT_INSTALLED, FAILED_EXECUTION, FAILED_OUTPUT_PARSE, POCKET_CENTER_MISSING, NOT_AVAILABLE
     gnina_docking_score = Column(Float, nullable=True)  # kcal/mol
     diffdock_score = Column(Float, nullable=True)
     pose_agreement = Column(String, nullable=True)  # HIGH, MEDIUM, LOW, NOT_AVAILABLE

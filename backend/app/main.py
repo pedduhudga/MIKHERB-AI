@@ -41,7 +41,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from app.core.firebase import init_firebase, is_firebase_active
+from app.core.firebase import init_firebase, is_firebase_active, get_current_user, sync_db_project_to_firestore
 
 # Initialize Firebase if credentials exist
 init_firebase()
@@ -75,14 +75,22 @@ def get_firebase_status():
 
 # Projects & Pipeline
 @app.post("/api/v1/projects", response_model=ProjectResponse)
-def create_project(project_in: ProjectCreate, db: Session = Depends(get_db)):
-    db_project = Project(**project_in.model_dump())
+def create_project(
+    project_in: ProjectCreate,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    project_data = project_in.model_dump()
+    if current_user and current_user.get("email"):
+        project_data["researcher"] = current_user.get("email")
+    db_project = Project(**project_data)
     db.add(db_project)
     db.commit()
     db.refresh(db_project)
 
     runner = DiscoveryPipelineRunner(db)
     runner.initialize_project_pipeline(db_project.id)
+    sync_db_project_to_firestore(db_project.id, db)
     return db_project
 
 @app.get("/api/v1/projects", response_model=List[ProjectResponse])
@@ -101,13 +109,19 @@ def get_project_stages(project_id: int, db: Session = Depends(get_db)):
     return db.query(PipelineStage).filter_by(project_id=project_id).order_by(PipelineStage.stage_order).all()
 
 @app.post("/api/v1/projects/{project_id}/run")
-def run_project_discovery(project_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def run_project_discovery(
+    project_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     proj = db.query(Project).filter_by(id=project_id).first()
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
 
     proj.status = "running"
     db.commit()
+    sync_db_project_to_firestore(project_id, db)
 
     runner = DiscoveryPipelineRunner(db)
     background_tasks.add_task(runner.run_pipeline, project_id)
@@ -126,12 +140,17 @@ def get_candidate_detail(candidate_id: int, db: Session = Depends(get_db)):
     return cand
 
 @app.post("/api/v1/candidates/{candidate_id}/add_to_queue")
-def add_candidate_to_experimental_queue(candidate_id: int, db: Session = Depends(get_db)):
+def add_candidate_to_experimental_queue(
+    candidate_id: int,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     cand = db.query(Candidate).filter_by(id=candidate_id).first()
     if not cand:
         raise HTTPException(status_code=404, detail="Candidate not found")
     cand.status = "in_experimental_queue"
     db.commit()
+    sync_db_project_to_firestore(cand.project_id, db)
     return {"status": "SUCCESS", "candidate_code": cand.compound_code, "new_status": cand.status}
 
 @app.get("/api/v1/projects/{project_id}/targets", response_model=List[TargetProteinResponse])
@@ -155,7 +174,11 @@ def pubchem_search(query: str = Query(...)):
 
 # Formulation Intelligence
 @app.post("/api/v1/formulation/analyze", response_model=FormulationResponse)
-def analyze_formulation_endpoint(formulation_in: FormulationCreate, db: Session = Depends(get_db)):
+def analyze_formulation_endpoint(
+    formulation_in: FormulationCreate,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     analysis = formulation_engine.analyze_formulation(
         formulation_in.active_ingredient,
         formulation_in.active_concentration_g_l,
@@ -193,7 +216,11 @@ def list_formulations(db: Session = Depends(get_db)):
 
 # Experiments & Active Learning
 @app.post("/api/v1/experiments", response_model=ExperimentTrialResponse)
-def record_experiment_trial(trial_in: ExperimentTrialCreate, db: Session = Depends(get_db)):
+def record_experiment_trial(
+    trial_in: ExperimentTrialCreate,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     raw_vals = [r.get("visual_injury_pct", 0.0) for r in trial_in.replicates_data]
     stats_res = StatisticalAnalyzer.analyze_replicates(raw_vals)
 

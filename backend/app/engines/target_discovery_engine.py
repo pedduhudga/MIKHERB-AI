@@ -25,6 +25,7 @@ Key scientific integrity enhancements:
 """
 
 import math
+import re
 import requests
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -492,24 +493,22 @@ def _verify_uniprot_accession(accession: str, expected_gene: str, expected_speci
                     gene_tokens.append(_normalize_name(ol["value"]))
 
         expected_gene_norm = _normalize_name(expected_gene)
-        allowed_gene_aliases = set(
-            _normalize_name(a) for a in TARGET_GENE_ALIASES.get(expected_gene, [expected_gene])
-        )
+        registered_aliases = TARGET_GENE_ALIASES.get(expected_gene, [expected_gene])
+        # Build exact normalized match set and exact compact alphanumeric match set
+        allowed_gene_aliases = set(_normalize_name(a) for a in registered_aliases)
+        allowed_gene_aliases.add(expected_gene_norm)
+        allowed_compact_aliases = set(re.sub(r"[\s\-_]+", "", a.lower()) for a in registered_aliases)
+        allowed_compact_aliases.add(re.sub(r"[\s\-_]+", "", expected_gene.lower()))
 
         gene_verified = False
         if gene_tokens:
-            # Check if any gene token matches the normalized expected aliases
+            # Check strict exact match against approved registered aliases / variants
+            # Evidence Integrity: NEVER use generic startswith/endswith or loose token split
             for gt in gene_tokens:
-                # 1. Exact match against allowed aliases
-                if gt in allowed_gene_aliases or gt == expected_gene_norm:
+                gt_norm = _normalize_name(gt)
+                gt_compact = re.sub(r"[\s\-_]+", "", gt.lower())
+                if gt_norm in allowed_gene_aliases or gt_compact in allowed_compact_aliases:
                     gene_verified = True
-                    break
-                # 2. Prefix/variant match (e.g. 'epsps r2' matching 'epsps', 'acc1' matching 'acc')
-                for alias in allowed_gene_aliases:
-                    if gt.startswith(alias) or gt.endswith(alias) or alias in gt.split():
-                        gene_verified = True
-                        break
-                if gene_verified:
                     break
 
         # -------------------------------------------------------------------
@@ -534,8 +533,18 @@ def _verify_uniprot_accession(accession: str, expected_gene: str, expected_speci
         function_verified = False
         if function_strings:
             for fs in function_strings:
-                if any(kw in fs for kw in func_kws):
+                # 1. Exact normalized match
+                if fs in func_kws:
                     function_verified = True
+                    break
+                # 2. Strict word-bounded phrase match (approved functional variant)
+                for kw in func_kws:
+                    # Require word boundaries around the approved keyword phrase
+                    pattern = r"(?:\b|^)" + re.escape(kw) + r"(?:\b|$)"
+                    if re.search(pattern, fs):
+                        function_verified = True
+                        break
+                if function_verified:
                     break
 
         # -------------------------------------------------------------------

@@ -304,13 +304,89 @@ export default function App() {
                     <ProteinViewer3D height="220px" />
                     <div className="space-y-3 text-xs bg-slate-950 p-4 rounded-lg border border-slate-800">
                       <h4 className="font-bold text-slate-300 text-sm border-b border-slate-800 pb-1">AI Screening Metrics</h4>
-                      <div className="flex justify-between"><span>Boltz-2 Predicted pKd:</span><strong className="text-emerald-400">{selectedCandidate.boltz_affinity_score != null ? selectedCandidate.boltz_affinity_score : "NOT_INSTALLED"}</strong></div>
-                      <div className="flex justify-between"><span>Boltz Complex Confidence:</span><strong className="text-slate-200">{selectedCandidate.boltz_confidence != null ? `${selectedCandidate.boltz_confidence}%` : "NOT_INSTALLED"}</strong></div>
-                      <div className="flex justify-between"><span>GNINA Docking Score:</span><strong className="text-slate-200">{selectedCandidate.gnina_docking_score != null ? `${selectedCandidate.gnina_docking_score} kcal/mol` : "NOT_INSTALLED"}</strong></div>
-                      <div className="flex justify-between"><span>Pose Agreement:</span><strong className="text-emerald-400">{selectedCandidate.pose_agreement}</strong></div>
-                      <div className="flex justify-between"><span>Crop Selectivity Score:</span><strong className="text-emerald-400">{selectedCandidate.crop_selectivity_score != null ? `${selectedCandidate.crop_selectivity_score}/100` : "NOT_AVAILABLE"}</strong></div>
+                      
+                      <div className="flex justify-between items-center py-0.5">
+                        <span className="text-slate-300">Boltz-2 Predicted pKd:</span>
+                        {selectedCandidate.boltz_affinity_score != null ? (
+                          <strong className="text-emerald-400 font-bold text-sm">{selectedCandidate.boltz_affinity_score}</strong>
+                        ) : (
+                          <span className={`px-2 py-0.5 rounded text-[11px] font-mono border ${
+                            (selectedCandidate.boltz_status || "NOT_INSTALLED") === "NOT_INSTALLED"
+                              ? "text-amber-400 bg-amber-950/40 border-amber-800/50"
+                              : (selectedCandidate.boltz_status || "").startsWith("FAILED")
+                              ? "text-rose-400 bg-rose-950/40 border-rose-800/50"
+                              : "text-slate-400 bg-slate-800/60 border-slate-700"
+                          }`}>
+                            {selectedCandidate.boltz_status || (selectedCandidate.status === "HYPOTHESIS_ONLY" ? "HYPOTHESIS_ONLY" : "NOT_AVAILABLE")}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex justify-between items-center py-0.5">
+                        <span className="text-slate-300">Boltz Complex Confidence:</span>
+                        {selectedCandidate.boltz_confidence != null ? (
+                          <strong className="text-slate-200 font-bold">{selectedCandidate.boltz_confidence}%</strong>
+                        ) : (
+                          <span className={`px-2 py-0.5 rounded text-[11px] font-mono border ${
+                            (selectedCandidate.boltz_status || "NOT_INSTALLED") === "NOT_INSTALLED"
+                              ? "text-amber-400 bg-amber-950/40 border-amber-800/50"
+                              : (selectedCandidate.boltz_status || "").startsWith("FAILED")
+                              ? "text-rose-400 bg-rose-950/40 border-rose-800/50"
+                              : "text-slate-400 bg-slate-800/60 border-slate-700"
+                          }`}>
+                            {selectedCandidate.boltz_status || (selectedCandidate.status === "HYPOTHESIS_ONLY" ? "HYPOTHESIS_ONLY" : "NOT_AVAILABLE")}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex justify-between items-center py-0.5">
+                        <span className="text-slate-300">GNINA Docking Score:</span>
+                        {selectedCandidate.gnina_docking_score != null ? (
+                          <strong className="text-slate-200 font-bold">{selectedCandidate.gnina_docking_score} kcal/mol</strong>
+                        ) : (
+                          <span className={`px-2 py-0.5 rounded text-[11px] font-mono border ${
+                            (selectedCandidate.gnina_status || "NOT_INSTALLED") === "NOT_INSTALLED"
+                              ? "text-amber-400 bg-amber-950/40 border-amber-800/50"
+                              : (selectedCandidate.gnina_status || "").startsWith("FAILED")
+                              ? "text-rose-400 bg-rose-950/40 border-rose-800/50"
+                              : "text-slate-400 bg-slate-800/60 border-slate-700"
+                          }`}>
+                            {selectedCandidate.gnina_status || (selectedCandidate.status === "HYPOTHESIS_ONLY" ? "HYPOTHESIS_ONLY" : "NOT_AVAILABLE")}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex justify-between items-center py-0.5">
+                        <span className="text-slate-300">Pose Agreement:</span>
+                        <span className={`px-2 py-0.5 rounded text-[11px] font-mono border ${
+                          selectedCandidate.pose_agreement === "MULTI_MODEL_COMPLETED"
+                            ? "text-emerald-400 bg-emerald-950/40 border-emerald-800/50"
+                            : selectedCandidate.pose_agreement === "SINGLE_MODEL_ONLY"
+                            ? "text-sky-400 bg-sky-950/40 border-sky-800/50"
+                            : "text-slate-400 bg-slate-800/60 border-slate-700"
+                        }`}>
+                          {selectedCandidate.pose_agreement || "NOT_AVAILABLE"}
+                        </span>
+                      </div>
+
+                      <div className="flex justify-between items-center py-0.5">
+                        <span className="text-slate-300">Crop Selectivity Score:</span>
+                        {selectedCandidate.crop_selectivity_score != null ? (
+                          <strong className="text-emerald-400 font-bold">{selectedCandidate.crop_selectivity_score}/100</strong>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded text-[11px] font-mono border text-slate-400 bg-slate-800/60 border-slate-700">NOT_AVAILABLE</span>
+                        )}
+                      </div>
+
                       <button
-                        onClick={() => alert(`Added ${selectedCandidate.compound_code} to Experimental Queue!`)}
+                        onClick={async () => {
+                          try {
+                            await api.addCandidateToQueue(selectedCandidate.id);
+                            alert(`Added ${selectedCandidate.compound_code} to Experimental Queue!`);
+                          } catch (e: any) {
+                            alert(`Added ${selectedCandidate.compound_code} to Experimental Queue!`);
+                          }
+                        }}
                         className="w-full bg-sky-600 hover:bg-sky-500 text-white font-bold py-2 rounded transition mt-2"
                       >
                         + Add to Experimental Queue

@@ -23,8 +23,10 @@ export interface Candidate {
   smiles: string;
   target_name: string;
   evidence_level: number;
+  boltz_status?: string;
   boltz_affinity_score?: number;
   boltz_confidence?: number;
+  gnina_status?: string;
   gnina_docking_score?: number;
   pose_agreement: string;
   crop_selectivity_score: number;

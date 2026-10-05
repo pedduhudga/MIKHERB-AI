@@ -725,3 +725,44 @@ def test_report_generator_preserves_status_codes(tmp_path):
     out = ReportGenerator.generate_pdf_report(project_data, pdf_file)
     assert os.path.exists(out)
     assert os.path.getsize(out) > 500
+
+
+def test_target_discovery_gene_alias_strict_exact_matching():
+    """
+    Evidence Integrity v9.1:
+    Gene alias matching must follow the strict hierarchy:
+      EXACT NORMALIZED ALIAS -> explicit approved variant -> otherwise INVALID
+    Unregistered prefix/suffix tokens (e.g. 'alstemp', 'false_als', 'epsps_fake') must be strictly rejected.
+    """
+    from app.engines.target_discovery_engine import _verify_uniprot_accession
+
+    # Case 1: Loose prefix like 'alstemp' must NOT pass ALS matching
+    mock_resp_bad = MagicMock()
+    mock_resp_bad.status_code = 200
+    mock_resp_bad.json.return_value = {
+        "entryType": "UniProtKB reviewed (Swiss-Prot)",
+        "organism": {"scientificName": "Arabidopsis thaliana", "taxonId": 3702},
+        "genes": [{"geneName": {"value": "alstemp"}}],
+        "proteinDescription": {"recommendedName": {"fullName": {"value": "Acetolactate synthase, chloroplastic"}}}
+    }
+    with patch("requests.get", return_value=mock_resp_bad):
+        res = _verify_uniprot_accession("P17597", "ALS", "Arabidopsis thaliana")
+        assert res["status"] == "INVALID"
+        assert res["gene_verified"] is False
+        assert "GENE_MISMATCH" in res["reason"]
+
+    # Case 2: Exact registered variant 'ahas' or 'csr1' must pass
+    mock_resp_good = MagicMock()
+    mock_resp_good.status_code = 200
+    mock_resp_good.json.return_value = {
+        "entryType": "UniProtKB reviewed (Swiss-Prot)",
+        "organism": {"scientificName": "Arabidopsis thaliana", "taxonId": 3702},
+        "genes": [{"geneName": {"value": "CSR1"}}],
+        "proteinDescription": {"recommendedName": {"fullName": {"value": "Acetolactate synthase, chloroplastic"}}}
+    }
+    with patch("requests.get", return_value=mock_resp_good):
+        res_good = _verify_uniprot_accession("P17597", "ALS", "Arabidopsis thaliana")
+        assert res_good["status"] == "VERIFIED"
+        assert res_good["gene_verified"] is True
+        assert res_good["function_verified"] is True
+

@@ -11,6 +11,7 @@ from app.engines.selectivity_engine import CropSelectivityEngine
 from app.engines.consensus_engine import MikHerbConsensusScoreEngine
 from app.engines.target_discovery_engine import MultiTargetDiscoveryEngine, _fetch_fasta_seq
 from app.core.provenance import generate_provenance_record, save_provenance_file
+from app.core.firebase import sync_db_project_to_firestore
 from app.services.report_service import ReportGenerator
 
 DEFAULT_STAGES = [
@@ -106,10 +107,12 @@ class DiscoveryPipelineRunner:
                 self.db.commit()
                 project.status = "failed"
                 self.db.commit()
+                sync_db_project_to_firestore(project_id, self.db)
                 return {"status": "FAILED", "failed_stage": stage.stage_name, "error": str(e)}
 
         project.status = "completed"
         self.db.commit()
+        sync_db_project_to_firestore(project_id, self.db)
         return {"status": "COMPLETED", "project_id": project_id}
 
     def _execute_stage(self, project: Project, stage: PipelineStage) -> dict:
@@ -646,8 +649,10 @@ class DiscoveryPipelineRunner:
                     smiles=comp.smiles,
                     target_name=target.name,
                     evidence_level=evidence_lvl,
+                    boltz_status=boltz_actual_status,
                     boltz_affinity_score=boltz_pKd,
                     boltz_confidence=boltz_conf,
+                    gnina_status=gnina_actual_status,
                     gnina_docking_score=gnina_aff,
                     pose_agreement=pose_agree,
                     crop_selectivity_score=sel_score,  # Preserved as None if unavailable

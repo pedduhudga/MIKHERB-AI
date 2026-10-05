@@ -92,8 +92,10 @@ class CandidateResponse(BaseModel):
     smiles: str
     target_name: str
     evidence_level: int
+    boltz_status: Optional[str] = None
     boltz_affinity_score: Optional[float] = None
     boltz_confidence: Optional[float] = None
+    gnina_status: Optional[str] = None
     gnina_docking_score: Optional[float] = None
     diffdock_score: Optional[float] = None
     pose_agreement: Optional[str] = None
