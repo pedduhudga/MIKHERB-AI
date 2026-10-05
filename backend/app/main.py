@@ -325,25 +325,57 @@ def execute_molecular_generation_run(
     if target.pockets_json and isinstance(target.pockets_json, list) and len(target.pockets_json) > 0:
         p_center = target.pockets_json[0].get("center")
 
+    target_analysis = target.analysis_json or {}
+    validated_artifact = target_analysis.get("validated_target_artifact") or {}
+    real_uniprot_id = target.uniprot_id or validated_artifact.get("weed_uniprot_id")
+
+    gene_ver = target_analysis.get("gene_verified")
+    if gene_ver is None:
+        gene_ver = validated_artifact.get("gene_verified")
+
+    func_ver = target_analysis.get("function_verified")
+    if func_ver is None:
+        func_ver = validated_artifact.get("function_verified")
+
+    target_ident_ver = target_analysis.get("target_identity_verified")
+    if target_ident_ver is None:
+        target_ident_ver = validated_artifact.get("target_identity_verified")
+
+    org_ver = target_analysis.get("organism_verified")
+    if org_ver is None:
+        org_ver = validated_artifact.get("organism_verified")
+
+    essentiality_ev = (
+        target.essentiality_status
+        or validated_artifact.get("essentiality_evidence")
+        or target_analysis.get("essentiality_evidence")
+    )
+
     target_info = {
         "id": target.id,
         "target_id": target.id,
         "gene": target.gene or target.name,
         "name": target.name,
-        "target_family": target.target_family or "ALS",
-        "weed_species": proj.weed_species or "Amaranthus palmeri",
-        "organism": proj.weed_species or "Amaranthus palmeri",
-        "weed_uniprot_id": target.uniprot_id or "P17767",
-        "uniprot_id": target.uniprot_id or "P17767",
-        "gene_verified": True,
-        "function_verified": True,
-        "essentiality_evidence": target.essentiality_status or "Essential target enzyme for plant survival",
+        "target_family": target.target_family,
+        "weed_species": proj.weed_species,
+        "organism": proj.weed_species,
+        "weed_uniprot_id": real_uniprot_id,
+        "uniprot_id": real_uniprot_id,
+        "target_identity_verified": target_ident_ver,
+        "organism_verified": org_ver,
+        "gene_verified": gene_ver,
+        "function_verified": func_ver,
+        "essentiality_evidence": essentiality_ev,
         "weed_sequence": target.weed_sequence,
         "sequence": target.weed_sequence,
-        "pdb_id": target.pdb_id,
-        "alphafold_available": True if (target.alphafold_id or target.structure_confidence) else False,
+        "pdb_path": target.pdb_id or validated_artifact.get("pdb_path"),
+        "structure_status": validated_artifact.get("structure_status", "ALPHA_FOLD_RETRIEVED" if target.pdb_id else "STRUCTURE_UNAVAILABLE"),
+        "structure_confidence": target.structure_confidence,
+        "alphafold_available": bool(target.alphafold_id or target.structure_confidence),
         "pockets_json": target.pockets_json,
-        "pocket_center": p_center
+        "pocket_center": p_center,
+        "pocket_prediction_status": validated_artifact.get("pocket_prediction_status", "COMPLETED" if p_center else "NO_POCKETS"),
+        "weed_accession_provenance": target_analysis.get("weed_accession_provenance") or validated_artifact.get("provenance")
     }
 
     filter_cfg = MolecularFilterConfig(**(run.filter_config_json or {})) if run.filter_config_json else None

@@ -83,7 +83,7 @@ class DatabaseRetrievalGenerator(BaseMolecularGenerator):
             "engine": self.name,
             "version": self.version,
             "status": "INSTALLED",
-            "tier": "SCIENTIFICALLY_VALIDATED",
+            "tier": "PROBE_VALIDATED",
             "generation_mode": GenerationMode.DATABASE_RETRIEVAL.value,
             "supported_external_databases": ["PubChem PUG REST API", "ChEMBL REST API", "Curated Target Benchmarks"]
         }
@@ -126,15 +126,17 @@ class DatabaseRetrievalGenerator(BaseMolecularGenerator):
         self,
         gene: str,
         uniprot_id: Optional[str] = None,
+        target_organism: Optional[str] = None,
         timeout: int = 5
     ) -> List[Dict[str, Any]]:
         """
         Dynamically searches ChEMBL REST API for target bioactivity records (IC50, Ki, Kd)
         and associated confirmed chemical inhibitor ligands.
+        Requires UniProt accession resolution or confirmed organism alignment to prevent cross-organism mismatch.
         """
         chembl_compounds = []
         try:
-            # 1. Resolve ChEMBL target ID via UniProt accession or gene query
+            # 1. Resolve ChEMBL target ID via UniProt accession (strict) or organism-verified search
             target_chembl_id = None
             if uniprot_id:
                 t_url = f"https://www.ebi.ac.uk/chembl/api/data/target.json?target_components__accession={uniprot_id.strip()}&limit=1"
@@ -146,12 +148,23 @@ class DatabaseRetrievalGenerator(BaseMolecularGenerator):
 
             if not target_chembl_id and gene:
                 encoded_gene = urllib.parse.quote(gene.strip())
-                t_url = f"https://www.ebi.ac.uk/chembl/api/data/target/search.json?q={encoded_gene}&limit=2"
+                t_url = f"https://www.ebi.ac.uk/chembl/api/data/target/search.json?q={encoded_gene}&limit=5"
                 resp = requests.get(t_url, timeout=timeout)
                 if resp.status_code == 200:
                     targets = resp.json().get("targets", [])
-                    if targets:
-                        target_chembl_id = targets[0].get("target_chembl_id")
+                    for tgt in targets:
+                        # Verify organism alignment if organism specified, or require plant/weed target type
+                        t_org = str(tgt.get("organism") or "").lower()
+                        t_type = str(tgt.get("target_type") or "").upper()
+                        if target_organism and target_organism.lower() in t_org:
+                            target_chembl_id = tgt.get("target_chembl_id")
+                            break
+                        elif t_type in ["SINGLE PROTEIN", "PROTEIN COMPLEX"]:
+                            # Require verified gene symbol match in target pref_name
+                            p_name = str(tgt.get("pref_name") or "").upper()
+                            if gene.upper() in p_name:
+                                target_chembl_id = tgt.get("target_chembl_id")
+                                break
 
             if not target_chembl_id:
                 return []
@@ -242,8 +255,14 @@ class DatabaseRetrievalGenerator(BaseMolecularGenerator):
         seen_smiles = set()
 
         # 1. Attempt dynamic ChEMBL bioactivity retrieval if live API preferred
+        target_organism = target_info.get("weed_species") or target_info.get("organism")
         if prefer_live:
-            chembl_hits = self._query_chembl_bioactivity_api(gene=gene, uniprot_id=uniprot_id, timeout=4)
+            chembl_hits = self._query_chembl_bioactivity_api(
+                gene=gene,
+                uniprot_id=uniprot_id,
+                target_organism=target_organism,
+                timeout=4
+            )
             for c_hit in chembl_hits:
                 smi = c_hit.get("canonical_smiles")
                 if smi and smi not in seen_smiles and len(molecules) < max_candidates:

@@ -790,6 +790,9 @@ class MultiTargetDiscoveryEngine:
             # Verify accession against UniProt
             v_res = _verify_uniprot_accession(weed_accession, gene, weed_canonical)
             weed_provenance["provenance_status"] = v_res["status"]
+            weed_provenance["organism_verified"] = v_res.get("organism_verified", False)
+            weed_provenance["gene_verified"] = v_res.get("gene_verified", False)
+            weed_provenance["function_verified"] = v_res.get("function_verified", False)
             if v_res.get("reason"):
                 weed_provenance["verification_detail"] = v_res["reason"]
             if v_res["status"] == "INVALID":
@@ -807,6 +810,9 @@ class MultiTargetDiscoveryEngine:
                     "source": "UniProt",
                     "source_type": "DYNAMIC_SEARCH",
                     "provenance_status": v_res["status"],
+                    "organism_verified": v_res.get("organism_verified", False),
+                    "gene_verified": v_res.get("gene_verified", False),
+                    "function_verified": v_res.get("function_verified", False),
                     "retrieved_at": "dynamic",
                     "reviewed": v_res["reviewed"],
                     "species": weed_species,
@@ -951,6 +957,10 @@ class MultiTargetDiscoveryEngine:
             "weed_species":               weed_species,
             "weed_uniprot_id":            weed_accession,
             "weed_accession_provenance":  weed_provenance,
+            "target_identity_verified":   bool(weed_accession and weed_provenance and weed_provenance.get("provenance_status") == "VERIFIED"),
+            "organism_verified":          bool(weed_provenance and weed_provenance.get("organism_verified") is True),
+            "gene_verified":              bool(weed_provenance and weed_provenance.get("gene_verified") is True),
+            "function_verified":          bool(weed_provenance and weed_provenance.get("function_verified") is True),
             "weed_sequence_length":       sequence_length,
             "weed_sequence_available":    weed_seq is not None,
             "target_present_in_weed":     target_present_in_weed,

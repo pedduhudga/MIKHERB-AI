@@ -333,32 +333,52 @@ def test_molecular_generation_manager_strict_7_stage_target_validation_gate():
     assert res_s2["status"] == GenerationRunStatus.FAILED.value
     assert "TARGET_IDENTITY_VERIFIED" in res_s2["error"]
 
-    # 4. Stage 3: Explicitly unverified gene
-    res_s3 = manager.execute_generation_run(
+    # 4. Stage 3: Unverified gene (both None and False must be rejected)
+    res_s3_none = manager.execute_generation_run(
+        target_info={
+            "id": 1, "gene": "ALS", "target_family": "ALS",
+            "weed_species": "Amaranthus palmeri", "sequence": "MVKLAARSTPGRSVVTALKP"
+        },
+        generation_mode=GenerationMode.RDKit_ENUMERATION
+    )
+    assert res_s3_none["status"] == GenerationRunStatus.FAILED.value
+    assert "GENE_VERIFIED" in res_s3_none["error"]
+
+    res_s3_false = manager.execute_generation_run(
         target_info={
             "id": 1, "gene": "ALS", "target_family": "ALS", "gene_verified": False,
             "weed_species": "Amaranthus palmeri", "sequence": "MVKLAARSTPGRSVVTALKP"
         },
         generation_mode=GenerationMode.RDKit_ENUMERATION
     )
-    assert res_s3["status"] == GenerationRunStatus.FAILED.value
-    assert "GENE_VERIFIED" in res_s3["error"]
+    assert res_s3_false["status"] == GenerationRunStatus.FAILED.value
+    assert "GENE_VERIFIED" in res_s3_false["error"]
 
-    # 5. Stage 4: Unverified function
-    res_s4 = manager.execute_generation_run(
+    # 5. Stage 4: Unverified function (both None and False must be rejected when no essentiality evidence)
+    res_s4_none = manager.execute_generation_run(
         target_info={
-            "id": 1, "gene": "ALS", "target_family": "ALS", "function_verified": False,
+            "id": 1, "gene": "ALS", "target_family": "ALS", "gene_verified": True,
             "weed_species": "Amaranthus palmeri", "sequence": "MVKLAARSTPGRSVVTALKP"
         },
         generation_mode=GenerationMode.RDKit_ENUMERATION
     )
-    assert res_s4["status"] == GenerationRunStatus.FAILED.value
-    assert "FUNCTION_VERIFIED" in res_s4["error"]
+    assert res_s4_none["status"] == GenerationRunStatus.FAILED.value
+    assert "FUNCTION_VERIFIED" in res_s4_none["error"]
+
+    res_s4_false = manager.execute_generation_run(
+        target_info={
+            "id": 1, "gene": "ALS", "target_family": "ALS", "gene_verified": True, "function_verified": False,
+            "weed_species": "Amaranthus palmeri", "sequence": "MVKLAARSTPGRSVVTALKP"
+        },
+        generation_mode=GenerationMode.RDKit_ENUMERATION
+    )
+    assert res_s4_false["status"] == GenerationRunStatus.FAILED.value
+    assert "FUNCTION_VERIFIED" in res_s4_false["error"]
 
     # 6. Stage 5: Missing or unknown weed species
     res_s5 = manager.execute_generation_run(
         target_info={
-            "id": 1, "gene": "ALS", "target_family": "ALS",
+            "id": 1, "gene": "ALS", "target_family": "ALS", "gene_verified": True, "function_verified": True,
             "weed_species": "Unknown", "sequence": "MVKLAARSTPGRSVVTALKP"
         },
         generation_mode=GenerationMode.RDKit_ENUMERATION
@@ -369,7 +389,7 @@ def test_molecular_generation_manager_strict_7_stage_target_validation_gate():
     # 7. Stage 6: Missing or short peptide sequence (< 20 amino acids)
     res_s6 = manager.execute_generation_run(
         target_info={
-            "id": 1, "gene": "ALS", "target_family": "ALS",
+            "id": 1, "gene": "ALS", "target_family": "ALS", "gene_verified": True, "function_verified": True,
             "weed_species": "Amaranthus palmeri",
             "sequence": "MVKLA",  # Only 5 amino acids, rejected
             "pockets_json": [{"center": [1.0, 2.0, 3.0]}]
@@ -379,10 +399,10 @@ def test_molecular_generation_manager_strict_7_stage_target_validation_gate():
     assert res_s6["status"] == GenerationRunStatus.FAILED.value
     assert "PROTEIN_VALIDATED" in res_s6["error"]
 
-    # 8. Stage 7: Missing 3D pocket coordinates
+    # 8. Stage 7: Missing 3D pocket coordinates or failed pocket state
     res_s7 = manager.execute_generation_run(
         target_info={
-            "id": 1, "gene": "ALS", "target_family": "ALS",
+            "id": 1, "gene": "ALS", "target_family": "ALS", "gene_verified": True, "function_verified": True,
             "weed_species": "Amaranthus palmeri",
             "sequence": "MVKLAARSTPGRSVVTALKPALSD"
         },
@@ -390,6 +410,19 @@ def test_molecular_generation_manager_strict_7_stage_target_validation_gate():
     )
     assert res_s7["status"] == GenerationRunStatus.FAILED.value
     assert "STRUCTURE_POCKET_VALIDATED" in res_s7["error"]
+
+    res_s7_failed = manager.execute_generation_run(
+        target_info={
+            "id": 1, "gene": "ALS", "target_family": "ALS", "gene_verified": True, "function_verified": True,
+            "weed_species": "Amaranthus palmeri",
+            "sequence": "MVKLAARSTPGRSVVTALKPALSD",
+            "pocket_prediction_status": "FAILED_EXECUTION",
+            "pockets_json": [{"center": [1.0, 2.0, 3.0], "status": "FAILED_EXECUTION"}]
+        },
+        generation_mode=GenerationMode.RDKit_ENUMERATION
+    )
+    assert res_s7_failed["status"] == GenerationRunStatus.FAILED.value
+    assert "STRUCTURE_POCKET_VALIDATED" in res_s7_failed["error"]
 
     # 9. Complete valid target satisfies all 7 prerequisite gates
     valid_target = {
@@ -400,11 +433,14 @@ def test_molecular_generation_manager_strict_7_stage_target_validation_gate():
         "target_family": "ALS",
         "weed_species": "Amaranthus palmeri",
         "uniprot_id": "A0A890DLI3",
+        "target_identity_verified": True,
         "gene_verified": True,
         "function_verified": True,
         "essentiality_evidence": "Branched-chain amino acid pathway",
         "weed_sequence": "MVKLAARSTPGRSVVTALKPALSDQ",
-        "pockets_json": [{"center": [12.0, 15.0, 18.0], "residues": ["SER", "ASP", "LYS", "TYR", "VAL"]}]
+        "structure_status": "ALPHA_FOLD_RETRIEVED",
+        "pocket_prediction_status": "COMPLETED",
+        "pockets_json": [{"center": [12.0, 15.0, 18.0], "residues": ["SER", "ASP", "LYS", "TYR", "VAL"], "status": "COMPLETED"}]
     }
     res_valid = manager.execute_generation_run(
         target_info=valid_target,
@@ -419,6 +455,7 @@ def test_molecular_generation_manager_strict_7_stage_target_validation_gate():
     assert mol_1["pocket_complementarity"] is not None
     assert 0.0 <= mol_1["pocket_complementarity"]["pocket_fit_score"] <= 1.0
     assert mol_1["pocket_complementarity"]["shape_complementarity"] >= 0.0
+    assert mol_1["pocket_complementarity"]["evaluation_type"] == "POCKET_DERIVED_HEURISTIC"
 
 
 def test_top_n_candidate_limit_enforcement_up_to_500():
@@ -428,9 +465,11 @@ def test_top_n_candidate_limit_enforcement_up_to_500():
         "id": 1,
         "gene": "ALS",
         "target_family": "ALS",
+        "gene_verified": True,
+        "function_verified": True,
         "weed_species": "Amaranthus palmeri",
         "weed_sequence": "MVKLAARSTPGRSVVTALKPALSDQ",
-        "pockets_json": [{"center": [12.0, 15.0, 18.0]}]
+        "pockets_json": [{"center": [12.0, 15.0, 18.0], "status": "COMPLETED"}]
     }
 
     res = manager.execute_generation_run(
@@ -465,6 +504,8 @@ def test_structure_based_pocket_pharmacophore_analysis():
     test_mol = Chem.MolFromSmiles("Cc1nc(nc(n1)Cl)NC(=O)NS(=O)(=O)c2ccccc2Cl")  # Chlorsulfuron
     eval_res = PocketPharmacophoreAnalyzer.evaluate_molecule_pocket_fit(test_mol, features)
     assert 0.0 <= eval_res["pocket_fit_score"] <= 1.0
+    assert eval_res["pocket_compatibility_heuristic"] == eval_res["pocket_fit_score"]
+    assert eval_res["evaluation_type"] == "POCKET_DERIVED_HEURISTIC"
     assert eval_res["is_pocket_compatible"] is True
     assert eval_res["shape_complementarity"] > 0.4
     assert len(eval_res["satisfied_interactions"]) > 0
@@ -480,6 +521,8 @@ def test_chembl_bioactivity_retrieval_and_provenance_labels():
         "weed_sequence": "MVKLAARSTPGRSVVTALKPALSDQ",
         "pocket_center": [1.0, 2.0, 3.0]
     }
+    assert gen.get_status()["tier"] == "PROBE_VALIDATED"
+    assert gen.get_status()["status"] == "INSTALLED"
     res = gen.generate(target_info=target_info, parameters={"prefer_live_api": False}, max_candidates=5)
     assert res["status"] == "COMPLETED"
     assert len(res["molecules"]) > 0
@@ -542,9 +585,30 @@ def test_molecular_generation_api_crud_and_execution_lifecycle(client, db_sessio
         name="Palmer Amaranth ALS",
         gene="ALS",
         target_family="ALS",
+        uniprot_id="A0A890DLI3",
         weed_sequence="MVKLAARSTPGRSVVTALKPALSDQ",
         is_primary_selected=True,
-        pockets_json=[{"center": [12.0, 15.0, 18.0]}]
+        essentiality_status="ESSENTIAL_KNOWN",
+        pockets_json=[{"center": [12.0, 15.0, 18.0], "status": "COMPLETED"}],
+        analysis_json={
+            "gene_verified": True,
+            "function_verified": True,
+            "target_identity_verified": True,
+            "organism_verified": True,
+            "essentiality_evidence": "Essential branched-chain amino acid pathway enzyme",
+            "validated_target_artifact": {
+                "gene": "ALS",
+                "target_family": "ALS",
+                "weed_species": "Palmer Amaranth",
+                "weed_uniprot_id": "A0A890DLI3",
+                "gene_verified": True,
+                "function_verified": True,
+                "target_identity_verified": True,
+                "organism_verified": True,
+                "structure_status": "ALPHA_FOLD_RETRIEVED",
+                "pocket_prediction_status": "COMPLETED"
+            }
+        }
     )
     db_session.add(target)
     db_session.commit()
@@ -646,9 +710,30 @@ def test_discovery_pipeline_stage_3_executes_target_conditioned_generation(db_se
         name="Palmer Amaranth ALS",
         gene="ALS",
         target_family="ALS",
+        uniprot_id="A0A890DLI3",
         weed_sequence="MVKLAARSTPGRSVVTALKP",
         is_primary_selected=True,
-        pockets_json=[{"center": [10.5, 20.2, 30.8]}]
+        essentiality_status="ESSENTIAL_KNOWN",
+        pockets_json=[{"center": [10.5, 20.2, 30.8], "status": "COMPLETED"}],
+        analysis_json={
+            "gene_verified": True,
+            "function_verified": True,
+            "target_identity_verified": True,
+            "organism_verified": True,
+            "essentiality_evidence": "Essential branched-chain amino acid pathway enzyme",
+            "validated_target_artifact": {
+                "gene": "ALS",
+                "target_family": "ALS",
+                "weed_species": "Palmer Amaranth",
+                "weed_uniprot_id": "A0A890DLI3",
+                "gene_verified": True,
+                "function_verified": True,
+                "target_identity_verified": True,
+                "organism_verified": True,
+                "structure_status": "ALPHA_FOLD_RETRIEVED",
+                "pocket_prediction_status": "COMPLETED"
+            }
+        }
     )
     db_session.add(target)
     db_session.commit()

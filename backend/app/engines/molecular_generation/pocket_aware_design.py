@@ -232,6 +232,9 @@ class PocketPharmacophoreAnalyzer:
 
         return {
             "pocket_fit_score": composite_fit,
+            "pocket_compatibility_heuristic": composite_fit,
+            "evaluation_type": "POCKET_DERIVED_HEURISTIC",
+            "methodology": "Pocket Volume & Residue Physicochemical Complementarity (Heuristic)",
             "is_pocket_compatible": is_compatible,
             "shape_complementarity": round(shape_score, 3),
             "electrostatic_complementarity": round(electro_score, 3),

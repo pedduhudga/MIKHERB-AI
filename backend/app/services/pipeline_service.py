@@ -325,6 +325,31 @@ class DiscoveryPipelineRunner:
                         "crop_status": crop_status,
                         "crop_error_reason": crop_error_reason,
                         "all_targets_discovered": target_discovery_summary,
+                        "target_identity_verified": candidate.get("target_identity_verified", False),
+                        "organism_verified": candidate.get("organism_verified", False),
+                        "gene_verified": candidate.get("gene_verified", False),
+                        "function_verified": candidate.get("function_verified", False),
+                        "weed_accession_provenance": candidate.get("weed_accession_provenance"),
+                        "validated_target_artifact": {
+                            "target_id": None,  # Will be set to target_row.id below
+                            "gene": candidate["gene"],
+                            "target_family": candidate.get("family"),
+                            "weed_species": project.weed_species,
+                            "weed_uniprot_id": weed_acc,
+                            "target_identity_verified": candidate.get("target_identity_verified", False),
+                            "organism_verified": candidate.get("organism_verified", False),
+                            "gene_verified": candidate.get("gene_verified", False),
+                            "function_verified": candidate.get("function_verified", False),
+                            "essentiality_evidence": candidate.get("essentiality_evidence") or candidate.get("essentiality_status"),
+                            "weed_sequence": t_weed_seq,
+                            "sequence": t_weed_seq,
+                            "pdb_path": t_pdb_path,
+                            "structure_status": "ALPHA_FOLD_RETRIEVED" if t_pdb_path else "STRUCTURE_UNAVAILABLE",
+                            "structure_confidence": t_plddt,
+                            "pockets_json": t_pockets,
+                            "pocket_prediction_status": t_pockets[0].get("status") if (t_pockets and isinstance(t_pockets, list)) else "NO_POCKETS",
+                            "provenance_status": candidate.get("weed_accession_provenance", {}).get("provenance_status") if candidate.get("weed_accession_provenance") else "UNVERIFIED"
+                        }
                     }
                 )
                 self.db.add(target_row)
@@ -436,25 +461,61 @@ class DiscoveryPipelineRunner:
                         }
                         req_count = tier_counts.get(str(tier_setting).upper(), CandidateTier.STANDARD)
 
+                        # Consume real validated target artifact & evidence from Stage 1 & Stage 2
+                        target_analysis = primary_target.analysis_json or {}
+                        validated_artifact = target_analysis.get("validated_target_artifact") or {}
+
+                        # Resolve UniProt accession strictly from primary target without hardcoded accession fallback
+                        real_uniprot_id = primary_target.uniprot_id or validated_artifact.get("weed_uniprot_id")
+
+                        # Resolve verification evidence preserved from Stage 1 target discovery
+                        gene_ver = target_analysis.get("gene_verified")
+                        if gene_ver is None:
+                            gene_ver = validated_artifact.get("gene_verified")
+
+                        func_ver = target_analysis.get("function_verified")
+                        if func_ver is None:
+                            func_ver = validated_artifact.get("function_verified")
+
+                        target_ident_ver = target_analysis.get("target_identity_verified")
+                        if target_ident_ver is None:
+                            target_ident_ver = validated_artifact.get("target_identity_verified")
+
+                        org_ver = target_analysis.get("organism_verified")
+                        if org_ver is None:
+                            org_ver = validated_artifact.get("organism_verified")
+
+                        essentiality_ev = (
+                            primary_target.essentiality_status
+                            or validated_artifact.get("essentiality_evidence")
+                            or target_analysis.get("essentiality_evidence")
+                        )
+
                         target_dict = {
                             "id": primary_target.id,
                             "target_id": primary_target.id,
                             "gene": primary_target.gene or primary_target.name,
                             "name": primary_target.name,
-                            "target_family": primary_target.target_family or "ALS",
-                            "weed_species": project.weed_species or "Amaranthus palmeri",
-                            "organism": project.weed_species or "Amaranthus palmeri",
-                            "weed_uniprot_id": primary_target.uniprot_id or "P17767",
-                            "uniprot_id": primary_target.uniprot_id or "P17767",
-                            "gene_verified": True,
-                            "function_verified": True,
-                            "essentiality_evidence": primary_target.essentiality_status or "Essential target enzyme for plant survival",
+                            "target_family": primary_target.target_family,
+                            "weed_species": project.weed_species,
+                            "organism": project.weed_species,
+                            "weed_uniprot_id": real_uniprot_id,
+                            "uniprot_id": real_uniprot_id,
+                            "target_identity_verified": target_ident_ver,
+                            "organism_verified": org_ver,
+                            "gene_verified": gene_ver,
+                            "function_verified": func_ver,
+                            "essentiality_evidence": essentiality_ev,
                             "weed_sequence": primary_target.weed_sequence,
                             "sequence": primary_target.weed_sequence,
+                            "pdb_path": primary_target.pdb_id or validated_artifact.get("pdb_path"),
+                            "structure_status": validated_artifact.get("structure_status", "ALPHA_FOLD_RETRIEVED" if primary_target.pdb_id else "STRUCTURE_UNAVAILABLE"),
+                            "structure_confidence": primary_target.structure_confidence,
+                            "alphafold_available": bool(primary_target.alphafold_id or primary_target.structure_confidence),
                             "pockets_json": primary_target.pockets_json,
                             "pocket_center": p_center,
-                            "structure_confidence": primary_target.structure_confidence,
-                            "alphafold_available": True if (primary_target.alphafold_id or primary_target.structure_confidence) else False
+                            "pocket_prediction_status": validated_artifact.get("pocket_prediction_status", "COMPLETED" if p_center else "NO_POCKETS"),
+                            "weed_accession_provenance": target_analysis.get("weed_accession_provenance") or validated_artifact.get("provenance")
                         }
 
                         gen_run = MolecularGenerationRun(

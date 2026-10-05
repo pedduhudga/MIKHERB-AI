@@ -108,8 +108,11 @@ class ProvenanceMetadata(BaseModel):
     provenance_hash: Optional[str] = None
 
 class PocketComplementarityResult(BaseModel):
-    pocket_fit_score: float = Field(..., description="Structure-based pocket complementarity score (0.0 to 1.0)")
-    is_pocket_compatible: bool = Field(..., description="Whether candidate satisfies binding pocket volume and pharmacophore constraints")
+    pocket_fit_score: float = Field(..., description="Pocket-derived compatibility heuristic score (0.0 to 1.0)")
+    pocket_compatibility_heuristic: float = Field(default=0.0, description="Explicitly labelled pocket compatibility heuristic")
+    evaluation_type: str = Field(default="POCKET_DERIVED_HEURISTIC", description="Evaluation methodology tier")
+    methodology: str = Field(default="Pocket Volume & Residue Physicochemical Complementarity (Heuristic)")
+    is_pocket_compatible: bool = Field(..., description="Whether candidate satisfies binding pocket volume and residue constraints")
     shape_complementarity: float = Field(..., description="Shape and volume match with pocket")
     electrostatic_complementarity: float = Field(..., description="Charge and H-bond donor/acceptor match with pocket residues")
     ligand_volume_angstrom3: float = Field(..., description="Estimated ligand volume in Å³")
