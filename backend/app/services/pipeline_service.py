@@ -85,6 +85,30 @@ class DiscoveryPipelineRunner:
                 self.db.add(stage)
             self.db.commit()
 
+    def run_stage(self, project_id: int, stage_order: int) -> Dict[str, Any]:
+        project = self.db.query(Project).filter_by(id=project_id).first()
+        if not project:
+            return {"status": "failed", "error": "Project not found"}
+        self.initialize_project_pipeline(project_id)
+        stage = self.db.query(PipelineStage).filter_by(project_id=project_id, stage_order=stage_order).first()
+        if not stage:
+            return {"status": "failed", "error": f"Stage {stage_order} not found"}
+        stage.status = "running"
+        stage.started_at = datetime.datetime.utcnow()
+        self.db.commit()
+        try:
+            summary = self._execute_stage(project, stage)
+            stage.status = "completed"
+            stage.results_summary = summary
+            stage.completed_at = datetime.datetime.utcnow()
+            self.db.commit()
+            return {"status": "completed", "stage": stage.stage_name, "results": summary}
+        except Exception as e:
+            stage.status = "failed"
+            stage.error_message = str(e) + "\n" + traceback.format_exc()
+            self.db.commit()
+            return {"status": "failed", "stage": stage.stage_name, "error": str(e)}
+
     def run_pipeline(self, project_id: int):
         project = self.db.query(Project).filter_by(id=project_id).first()
         if not project:
