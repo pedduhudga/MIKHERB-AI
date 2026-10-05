@@ -9,11 +9,15 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.hardware import check_hardware_status
 from app.db.database import get_db, engine, Base
-from app.models.models import Project, PipelineStage, TargetProtein, Compound, Candidate, Formulation, ExperimentTrial, AIModelRegistry
+from app.models.models import (
+    Project, PipelineStage, TargetProtein, Compound, Candidate, Formulation, ExperimentTrial, AIModelRegistry,
+    MolecularGenerationRun, GeneratedMolecule, MoleculeFilterResult, MoleculeNoveltyResult, MoleculeProvenance
+)
 from app.schemas.schemas import (
     ProjectCreate, ProjectResponse, PipelineStageResponse, TargetProteinResponse,
     CompoundResponse, CandidateResponse, FormulationCreate, FormulationResponse,
-    ExperimentTrialCreate, ExperimentTrialResponse
+    ExperimentTrialCreate, ExperimentTrialResponse,
+    MolecularGenerationRunCreate, MolecularGenerationRunResponse, GeneratedMoleculeResponse
 )
 from app.engines.protein_engine import ProteinEngine
 from app.engines.chemical_engine import ChemicalEngine
@@ -22,6 +26,9 @@ from app.engines.selectivity_engine import CropSelectivityEngine
 from app.engines.formulation_engine import FormulationEngine
 from app.engines.consensus_engine import MikHerbConsensusScoreEngine
 from app.engines.status_manager import engine_status_manager
+from app.engines.molecular_generation import (
+    MolecularGenerationManager, GenerationMode, MolecularFilterConfig, ChemicalValidatorAndFilter, NoveltyAnalyzer
+)
 from app.services.pipeline_service import DiscoveryPipelineRunner
 from app.services.statistics_service import StatisticalAnalyzer
 from app.services.qsar_service import QSARActiveLearningEngine
@@ -55,6 +62,7 @@ formulation_engine = FormulationEngine()
 consensus_engine = MikHerbConsensusScoreEngine()
 qsar_engine = QSARActiveLearningEngine()
 agent_service = AIResearchAgent()
+mol_gen_manager = MolecularGenerationManager()
 
 # ---------------- API ENDPOINTS ----------------
 
@@ -218,6 +226,337 @@ def get_project_targets(
         raise HTTPException(status_code=404, detail="Project not found")
     verify_project_ownership(proj, current_user)
     return db.query(TargetProtein).filter_by(project_id=project_id).all()
+
+# ---------------- Molecular Generation Endpoints ----------------
+
+@app.post("/api/v1/projects/{project_id}/molecular-generation/runs", response_model=MolecularGenerationRunResponse)
+def create_molecular_generation_run(
+    project_id: int,
+    run_in: MolecularGenerationRunCreate,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    proj = db.query(Project).filter_by(id=project_id).first()
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    verify_project_ownership(proj, current_user)
+
+    target = db.query(TargetProtein).filter_by(id=run_in.target_id, project_id=project_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail=f"Target {run_in.target_id} not found for this project")
+
+    try:
+        mode_enum = GenerationMode(run_in.generation_mode)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid generation mode '{run_in.generation_mode}'")
+
+    generator = mol_gen_manager.get_generator(mode_enum)
+    gen_name = generator.name if generator else run_in.generation_mode
+    gen_ver = generator.version if generator else "1.0.0"
+
+    run = MolecularGenerationRun(
+        project_id=project_id,
+        target_id=run_in.target_id,
+        run_name=run_in.run_name or f"{run_in.generation_mode} for {target.gene or target.name}",
+        generation_mode=run_in.generation_mode,
+        generator_name=gen_name,
+        generator_version=gen_ver,
+        status="PENDING",
+        random_seed=run_in.random_seed,
+        requested_count=run_in.requested_count,
+        parameters_json=run_in.parameters,
+        filter_config_json=run_in.filter_config
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    return run
+
+@app.get("/api/v1/projects/{project_id}/molecular-generation/runs", response_model=List[MolecularGenerationRunResponse])
+def list_molecular_generation_runs(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    proj = db.query(Project).filter_by(id=project_id).first()
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    verify_project_ownership(proj, current_user)
+    return db.query(MolecularGenerationRun).filter_by(project_id=project_id).order_by(MolecularGenerationRun.created_at.desc()).all()
+
+@app.get("/api/v1/projects/{project_id}/molecular-generation/runs/{run_id}", response_model=MolecularGenerationRunResponse)
+def get_molecular_generation_run(
+    project_id: int,
+    run_id: int,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    proj = db.query(Project).filter_by(id=project_id).first()
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    verify_project_ownership(proj, current_user)
+
+    run = db.query(MolecularGenerationRun).filter_by(id=run_id, project_id=project_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Molecular generation run not found")
+    return run
+
+@app.post("/api/v1/projects/{project_id}/molecular-generation/runs/{run_id}/execute")
+def execute_molecular_generation_run(
+    project_id: int,
+    run_id: int,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    proj = db.query(Project).filter_by(id=project_id).first()
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    verify_project_ownership(proj, current_user)
+
+    run = db.query(MolecularGenerationRun).filter_by(id=run_id, project_id=project_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Molecular generation run not found")
+
+    target = db.query(TargetProtein).filter_by(id=run.target_id).first()
+    if not target:
+        raise HTTPException(status_code=400, detail="Run target not found")
+
+    target_info = {
+        "target_id": target.id,
+        "gene": target.gene or target.name,
+        "target_family": target.target_family,
+        "weed_sequence": target.weed_sequence,
+        "pdb_id": target.pdb_id,
+        "pockets": target.pockets_json
+    }
+
+    filter_cfg = MolecularFilterConfig(**(run.filter_config_json or {})) if run.filter_config_json else None
+
+    run.status = "RUNNING"
+    db.commit()
+
+    try:
+        gen_res = mol_gen_manager.execute_generation_run(
+            target_info=target_info,
+            generation_mode=GenerationMode(run.generation_mode),
+            requested_count=run.requested_count,
+            random_seed=run.random_seed,
+            parameters=run.parameters_json,
+            filter_config=filter_cfg
+        )
+
+        run.status = gen_res.get("status", "COMPLETED")
+        run.generated_count = gen_res.get("generated_count", 0)
+        run.valid_count = gen_res.get("valid_count", 0)
+        run.rejected_count = gen_res.get("rejected_count", 0)
+        run.unique_count = gen_res.get("unique_count", 0)
+        run.novel_count = gen_res.get("novel_count", 0)
+        run.completed_at = datetime.datetime.utcnow()
+        if gen_res.get("error"):
+            run.error_message = gen_res.get("error")
+
+        # Persist generated molecules and detail records
+        for mol_data in gen_res.get("molecules", []):
+            props = mol_data.get("properties") or {}
+            alerts = mol_data.get("structural_alerts") or {}
+            novelty = mol_data.get("novelty") or {}
+            prov = mol_data.get("provenance") or {}
+
+            db_mol = GeneratedMolecule(
+                run_id=run.id,
+                project_id=project_id,
+                target_id=target.id,
+                compound_code=mol_data.get("compound_code"),
+                smiles=mol_data.get("smiles"),
+                canonical_smiles=mol_data.get("canonical_smiles"),
+                inchi=mol_data.get("inchi"),
+                inchikey=mol_data.get("inchikey"),
+                molecular_formula=props.get("molecular_formula"),
+                mw=props.get("molecular_weight"),
+                logp=props.get("logp"),
+                hbd=props.get("hbd"),
+                hba=props.get("hba"),
+                tpsa=props.get("tpsa"),
+                rotatable_bonds=props.get("rotatable_bonds"),
+                formal_charge=props.get("formal_charge"),
+                heavy_atom_count=props.get("heavy_atom_count"),
+                ring_count=props.get("ring_count"),
+                chemical_validation_status=mol_data.get("chemical_validation_status", "VALID"),
+                rejection_reason=mol_data.get("rejection_reason"),
+                generation_mode=run.generation_mode,
+                parent_molecule_smiles=prov.get("parent_molecule"),
+                parent_candidate_id=prov.get("parent_candidate_id"),
+                passed_all_filters=mol_data.get("passed_all_filters", False),
+                structural_alerts_count=alerts.get("alerts_count", 0),
+                structural_alerts_json=alerts.get("alerts_detected", []),
+                max_tanimoto_similarity=novelty.get("max_tanimoto_similarity"),
+                novelty_category=novelty.get("novelty_category"),
+                closest_known_compound=novelty.get("closest_known_compound")
+            )
+            db.add(db_mol)
+            db.commit()
+            db.refresh(db_mol)
+
+            # Persist filter result
+            db_filter = MoleculeFilterResult(
+                molecule_id=db_mol.id,
+                passed_all_filters=mol_data.get("passed_all_filters", False),
+                property_results_json=mol_data.get("filter_results"),
+                structural_alert_screen_passed=alerts.get("passed", True),
+                structural_alerts_detected_json=alerts.get("alerts_detected", [])
+            )
+            db.add(db_filter)
+
+            # Persist novelty result
+            db_novelty = MoleculeNoveltyResult(
+                molecule_id=db_mol.id,
+                exact_match=novelty.get("exact_match", False),
+                max_tanimoto_similarity=novelty.get("max_tanimoto_similarity"),
+                closest_known_compound=novelty.get("closest_known_compound"),
+                novelty_category=novelty.get("novelty_category"),
+                reference_database=novelty.get("reference_database", "Default")
+            )
+            db.add(db_novelty)
+
+            # Persist provenance record
+            p_center = None
+            if target.pockets_json and len(target.pockets_json) > 0:
+                p_center = target.pockets_json[0].get("center")
+
+            db_prov = MoleculeProvenance(
+                molecule_id=db_mol.id,
+                target_id=target.id,
+                protein_sequence_hash=prov.get("protein_sequence_hash"),
+                pocket_center_json=p_center,
+                generation_method=prov.get("generation_method", run.generation_mode),
+                generator_name=prov.get("generator_name", run.generator_name),
+                generator_version=prov.get("generator_version", run.generator_version),
+                parameters_json=prov.get("parameters"),
+                random_seed=prov.get("random_seed"),
+                provenance_hash=prov.get("provenance_hash", "UNKNOWN")
+            )
+            db.add(db_prov)
+
+        db.commit()
+        db.refresh(run)
+        return {
+            "status": run.status,
+            "run_id": run.id,
+            "generated_count": run.generated_count,
+            "valid_count": run.valid_count,
+            "rejected_count": run.rejected_count,
+            "unique_count": run.unique_count,
+            "novel_count": run.novel_count,
+            "error_message": run.error_message
+        }
+    except Exception as e:
+        run.status = "FAILED"
+        run.error_message = str(e)
+        db.commit()
+        return {"status": "FAILED", "run_id": run.id, "error": str(e)}
+
+@app.get("/api/v1/projects/{project_id}/molecules", response_model=List[GeneratedMoleculeResponse])
+def list_project_molecules(
+    project_id: int,
+    run_id: Optional[int] = Query(None),
+    status: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    proj = db.query(Project).filter_by(id=project_id).first()
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    verify_project_ownership(proj, current_user)
+
+    query = db.query(GeneratedMolecule).filter_by(project_id=project_id)
+    if run_id:
+        query = query.filter_by(run_id=run_id)
+    if status:
+        query = query.filter_by(chemical_validation_status=status)
+    return query.order_by(GeneratedMolecule.created_at.desc()).all()
+
+@app.get("/api/v1/projects/{project_id}/molecules/{molecule_id}")
+def get_project_molecule(
+    project_id: int,
+    molecule_id: int,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    proj = db.query(Project).filter_by(id=project_id).first()
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    verify_project_ownership(proj, current_user)
+
+    mol = db.query(GeneratedMolecule).filter_by(id=molecule_id, project_id=project_id).first()
+    if not mol:
+        raise HTTPException(status_code=404, detail="Molecule not found")
+
+    return {
+        "molecule": mol,
+        "filter_results": mol.filter_result,
+        "novelty": mol.novelty_result,
+        "provenance": mol.provenance_record
+    }
+
+@app.post("/api/v1/projects/{project_id}/molecules/{molecule_id}/validate")
+def revalidate_project_molecule(
+    project_id: int,
+    molecule_id: int,
+    filter_config: Optional[MolecularFilterConfig] = None,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    proj = db.query(Project).filter_by(id=project_id).first()
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    verify_project_ownership(proj, current_user)
+
+    mol = db.query(GeneratedMolecule).filter_by(id=molecule_id, project_id=project_id).first()
+    if not mol:
+        raise HTTPException(status_code=404, detail="Molecule not found")
+
+    cfg = filter_config or MolecularFilterConfig()
+    is_valid, val_status, rej_reason, can_smiles, inchi_str, inchikey_str, props_dict, mol_obj = (
+        ChemicalValidatorAndFilter.validate_and_characterize(mol.smiles)
+    )
+
+    if not is_valid:
+        return {"status": "REJECTED", "rejection_reason": rej_reason}
+
+    passed_all, filter_items = ChemicalValidatorAndFilter.apply_filters(props_dict, cfg)
+    alert_screen = ChemicalValidatorAndFilter.screen_structural_alerts(mol_obj, cfg)
+
+    return {
+        "status": "VALID",
+        "passed_all_filters": passed_all,
+        "filter_results": [f.model_dump() for f in filter_items],
+        "structural_alerts": alert_screen.model_dump()
+    }
+
+@app.post("/api/v1/projects/{project_id}/molecules/{molecule_id}/novelty")
+def evaluate_project_molecule_novelty(
+    project_id: int,
+    molecule_id: int,
+    database_scope: str = Query("MIKHERB Known Commercial Herbicides Catalogue"),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    proj = db.query(Project).filter_by(id=project_id).first()
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    verify_project_ownership(proj, current_user)
+
+    mol = db.query(GeneratedMolecule).filter_by(id=molecule_id, project_id=project_id).first()
+    if not mol:
+        raise HTTPException(status_code=404, detail="Molecule not found")
+
+    is_valid, _, _, can_smiles, _, _, _, mol_obj = ChemicalValidatorAndFilter.validate_and_characterize(mol.smiles)
+    if not is_valid or mol_obj is None:
+        raise HTTPException(status_code=400, detail="Cannot evaluate novelty on invalid molecule")
+
+    analyzer = NoveltyAnalyzer()
+    res = analyzer.evaluate_novelty(mol_obj, can_smiles, database_scope=database_scope)
+    return res.model_dump()
 
 # Chemical Intelligence
 @app.get("/api/v1/chemistry/descriptors")

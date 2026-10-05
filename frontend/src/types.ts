@@ -77,3 +77,55 @@ export interface ExperimentTrial {
     cv_pct: number;
   };
 }
+
+export interface MolecularGenerationRun {
+  id: number;
+  project_id: number;
+  target_id: number;
+  run_name: string;
+  generation_mode: string;
+  generator_name: string;
+  generator_version: string;
+  status: string;
+  random_seed?: number;
+  requested_count: number;
+  generated_count: number;
+  valid_count: number;
+  rejected_count: number;
+  unique_count: number;
+  novel_count: number;
+  parameters_json?: Record<string, any>;
+  error_message?: string;
+  created_at: string;
+  completed_at?: string;
+}
+
+export interface GeneratedMolecule {
+  id: number;
+  run_id: number;
+  project_id: number;
+  target_id: number;
+  compound_code: string;
+  smiles: string;
+  canonical_smiles?: string;
+  inchi?: string;
+  inchikey?: string;
+  molecular_formula?: string;
+  mw?: number;
+  logp?: number;
+  hbd?: number;
+  hba?: number;
+  tpsa?: number;
+  rotatable_bonds?: number;
+  chemical_validation_status: string;
+  rejection_reason?: string;
+  generation_mode: string;
+  parent_molecule_smiles?: string;
+  passed_all_filters: boolean;
+  structural_alerts_count: number;
+  structural_alerts_json?: string[];
+  max_tanimoto_similarity?: number;
+  novelty_category?: string;
+  closest_known_compound?: string;
+  created_at: string;
+}

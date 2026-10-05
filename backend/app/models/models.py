@@ -22,6 +22,7 @@ class Project(Base):
     pipeline_stages = relationship("PipelineStage", back_populates="project", cascade="all, delete-orphan")
     targets = relationship("TargetProtein", back_populates="project", cascade="all, delete-orphan")
     candidates = relationship("Candidate", back_populates="project", cascade="all, delete-orphan")
+    generation_runs = relationship("MolecularGenerationRun", back_populates="project", cascade="all, delete-orphan")
 
 class PipelineStage(Base):
     __tablename__ = "pipeline_stages"
@@ -211,3 +212,116 @@ class AIModelRegistry(Base):
     metrics = Column(JSON, nullable=True)  # R2, RMSE, Accuracy
     status = Column(String, default="validated")
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class MolecularGenerationRun(Base):
+    __tablename__ = "molecular_generation_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    target_id = Column(Integer, ForeignKey("target_proteins.id"), nullable=True)
+    run_name = Column(String, nullable=False)
+    generation_mode = Column(String, nullable=False)
+    generator_name = Column(String, nullable=False)
+    generator_version = Column(String, nullable=False)
+    status = Column(String, default="PENDING")  # PENDING, RUNNING, COMPLETED, FAILED, NOT_AVAILABLE
+    random_seed = Column(Integer, nullable=True)
+    requested_count = Column(Integer, default=20)
+    generated_count = Column(Integer, default=0)
+    valid_count = Column(Integer, default=0)
+    rejected_count = Column(Integer, default=0)
+    unique_count = Column(Integer, default=0)
+    novel_count = Column(Integer, default=0)
+    parameters_json = Column(JSON, nullable=True)
+    filter_config_json = Column(JSON, nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
+
+    project = relationship("Project", back_populates="generation_runs")
+    target = relationship("TargetProtein")
+    molecules = relationship("GeneratedMolecule", back_populates="run", cascade="all, delete-orphan")
+
+class GeneratedMolecule(Base):
+    __tablename__ = "generated_molecules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    run_id = Column(Integer, ForeignKey("molecular_generation_runs.id"), nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    target_id = Column(Integer, ForeignKey("target_proteins.id"), nullable=True)
+    compound_code = Column(String, index=True, nullable=False)
+    smiles = Column(Text, nullable=False)
+    canonical_smiles = Column(Text, nullable=True)
+    inchi = Column(Text, nullable=True)
+    inchikey = Column(String, index=True, nullable=True)
+    molecular_formula = Column(String, nullable=True)
+    mw = Column(Float, nullable=True)
+    logp = Column(Float, nullable=True)
+    hbd = Column(Integer, nullable=True)
+    hba = Column(Integer, nullable=True)
+    tpsa = Column(Float, nullable=True)
+    rotatable_bonds = Column(Integer, nullable=True)
+    formal_charge = Column(Integer, nullable=True)
+    heavy_atom_count = Column(Integer, nullable=True)
+    ring_count = Column(Integer, nullable=True)
+    chemical_validation_status = Column(String, default="VALID")  # VALID, REJECTED
+    rejection_reason = Column(Text, nullable=True)
+    generation_mode = Column(String, nullable=False)
+    parent_molecule_smiles = Column(Text, nullable=True)
+    parent_candidate_id = Column(String, nullable=True)
+    passed_all_filters = Column(Boolean, default=True)
+    structural_alerts_count = Column(Integer, default=0)
+    structural_alerts_json = Column(JSON, nullable=True)
+    max_tanimoto_similarity = Column(Float, nullable=True)
+    novelty_category = Column(String, nullable=True)
+    closest_known_compound = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    run = relationship("MolecularGenerationRun", back_populates="molecules")
+    filter_result = relationship("MoleculeFilterResult", back_populates="molecule", uselist=False, cascade="all, delete-orphan")
+    novelty_result = relationship("MoleculeNoveltyResult", back_populates="molecule", uselist=False, cascade="all, delete-orphan")
+    provenance_record = relationship("MoleculeProvenance", back_populates="molecule", uselist=False, cascade="all, delete-orphan")
+
+class MoleculeFilterResult(Base):
+    __tablename__ = "molecule_filter_results"
+
+    id = Column(Integer, primary_key=True, index=True)
+    molecule_id = Column(Integer, ForeignKey("generated_molecules.id"), nullable=False)
+    passed_all_filters = Column(Boolean, default=True)
+    property_results_json = Column(JSON, nullable=True)
+    structural_alert_screen_passed = Column(Boolean, default=True)
+    structural_alerts_detected_json = Column(JSON, nullable=True)
+    evaluated_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    molecule = relationship("GeneratedMolecule", back_populates="filter_result")
+
+class MoleculeNoveltyResult(Base):
+    __tablename__ = "molecule_novelty_results"
+
+    id = Column(Integer, primary_key=True, index=True)
+    molecule_id = Column(Integer, ForeignKey("generated_molecules.id"), nullable=False)
+    exact_match = Column(Boolean, default=False)
+    max_tanimoto_similarity = Column(Float, nullable=True)
+    closest_known_compound = Column(String, nullable=True)
+    novelty_category = Column(String, nullable=True)
+    reference_database = Column(String, nullable=True)
+    evaluated_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    molecule = relationship("GeneratedMolecule", back_populates="novelty_result")
+
+class MoleculeProvenance(Base):
+    __tablename__ = "molecule_provenance"
+
+    id = Column(Integer, primary_key=True, index=True)
+    molecule_id = Column(Integer, ForeignKey("generated_molecules.id"), nullable=False)
+    target_id = Column(Integer, nullable=True)
+    protein_sequence_hash = Column(String, nullable=True)
+    pocket_center_json = Column(JSON, nullable=True)
+    generation_method = Column(String, nullable=False)
+    generator_name = Column(String, nullable=False)
+    generator_version = Column(String, nullable=False)
+    parameters_json = Column(JSON, nullable=True)
+    random_seed = Column(Integer, nullable=True)
+    provenance_hash = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    molecule = relationship("GeneratedMolecule", back_populates="provenance_record")

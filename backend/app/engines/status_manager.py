@@ -128,6 +128,36 @@ def _validate_pubchem() -> bool:
     except Exception:
         return False
 
+def _validate_rdkit_enumerator() -> bool:
+    """Scientific validator for RDKit molecular enumerator using real fixture generation."""
+    try:
+        from app.engines.molecular_generation.rdkit_generator import RDKitMolecularEnumerator
+        gen = RDKitMolecularEnumerator()
+        res = gen.generate(
+            target_info={"gene": "ALS", "target_family": "ALS"},
+            parameters={},
+            random_seed=42,
+            max_candidates=2
+        )
+        return res.get("status") == "COMPLETED" and len(res.get("molecules", [])) > 0
+    except Exception:
+        return False
+
+def _validate_fragment_recombinator() -> bool:
+    """Scientific validator for fragment recombinator using real fixture generation."""
+    try:
+        from app.engines.molecular_generation.fragment_generator import FragmentRecombinationGenerator
+        gen = FragmentRecombinationGenerator()
+        res = gen.generate(
+            target_info={"gene": "ALS", "target_family": "ALS"},
+            parameters={},
+            random_seed=42,
+            max_candidates=2
+        )
+        return res.get("status") == "COMPLETED" and len(res.get("molecules", [])) > 0
+    except Exception:
+        return False
+
 class EngineStatusManager:
     """Manages system-wide transparency and two-phase (probe & scientific) validation for engines."""
 
@@ -141,7 +171,10 @@ class EngineStatusManager:
             "gnina": BaseScientificEngine("GNINA Deep Learning Docking", binary_name="gnina", validation_args=["--version"], scientific_validator=_validate_gnina),
             "boltz": BaseScientificEngine("Boltz-2 AI Structure Engine", binary_name="boltz", validation_args=["--help"], scientific_validator=_validate_boltz),
             "diffdock": BaseScientificEngine("DiffDock Pose Generator", binary_name="diffdock", validation_args=["--help"]),
-            "openmm": BaseScientificEngine("OpenMM Molecular Dynamics", is_python_lib=True, python_module="openmm")
+            "openmm": BaseScientificEngine("OpenMM Molecular Dynamics", is_python_lib=True, python_module="openmm"),
+            "rdkit_enumerator": BaseScientificEngine("RDKit Molecular Enumerator", is_python_lib=True, python_module="rdkit", scientific_validator=_validate_rdkit_enumerator),
+            "fragment_recombinator": BaseScientificEngine("Fragment Recombinator", is_python_lib=True, python_module="rdkit", scientific_validator=_validate_fragment_recombinator),
+            "generative_ai_adapter": BaseScientificEngine("Generative AI Model Adapter", binary_name="reinvent", validation_args=["--help"])
         }
 
     def get_all_statuses(self) -> Dict[str, Dict[str, Any]]:

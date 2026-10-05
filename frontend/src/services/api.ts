@@ -108,6 +108,52 @@ export const api = {
     });
     if (!res.ok) throw new Error(`Agent query failed with status ${res.status}`);
     return res.json();
+  },
+
+  getGenerationRuns: async (projectId: number) => {
+    const headers = await getAuthHeaders(false);
+    const res = await fetch(`${API_BASE_URL}/api/v1/projects/${projectId}/molecular-generation/runs`, { headers });
+    if (!res.ok) throw new Error(`Fetch generation runs failed with status ${res.status}`);
+    return res.json();
+  },
+
+  createGenerationRun: async (projectId: number, runData: any) => {
+    const headers = await getAuthHeaders(true);
+    const res = await fetch(`${API_BASE_URL}/api/v1/projects/${projectId}/molecular-generation/runs`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(runData)
+    });
+    if (!res.ok) throw new Error(`Create generation run failed with status ${res.status}`);
+    return res.json();
+  },
+
+  executeGenerationRun: async (projectId: number, runId: number) => {
+    const headers = await getAuthHeaders(false);
+    const res = await fetch(`${API_BASE_URL}/api/v1/projects/${projectId}/molecular-generation/runs/${runId}/execute`, {
+      method: 'POST',
+      headers
+    });
+    if (!res.ok) throw new Error(`Execute generation run failed with status ${res.status}`);
+    return res.json();
+  },
+
+  getProjectMolecules: async (projectId: number, runId?: number) => {
+    const headers = await getAuthHeaders(false);
+    const url = runId 
+      ? `${API_BASE_URL}/api/v1/projects/${projectId}/molecules?run_id=${runId}`
+      : `${API_BASE_URL}/api/v1/projects/${projectId}/molecules`;
+    const res = await fetch(url, { headers });
+    if (!res.ok) throw new Error(`Fetch molecules failed with status ${res.status}`);
+    return res.json();
+  },
+
+  getMoleculeDetail: async (projectId: number, moleculeId: number) => {
+    const headers = await getAuthHeaders(false);
+    const res = await fetch(`${API_BASE_URL}/api/v1/projects/${projectId}/molecules/${moleculeId}`, { headers });
+    if (!res.ok) throw new Error(`Fetch molecule detail failed with status ${res.status}`);
+    return res.json();
   }
 };
+
 

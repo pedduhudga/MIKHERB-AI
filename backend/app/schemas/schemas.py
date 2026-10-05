@@ -152,6 +152,74 @@ class ExperimentTrialResponse(BaseModel):
     mortality_pct: Optional[float] = None
     crop_phytotoxicity_pct: Optional[float] = None
     statistical_summary: Optional[Dict[str, Any]] = None
+    model_config = ConfigDict(from_attributes=True)
+
+# ---------------- Molecular Generation Schemas ----------------
+
+class MolecularGenerationRunCreate(BaseModel):
+    target_id: int
+    generation_mode: str = "RDKit_ENUMERATION"
+    run_name: Optional[str] = None
+    requested_count: int = 20
+    random_seed: Optional[int] = 42
+    parameters: Optional[Dict[str, Any]] = None
+    filter_config: Optional[Dict[str, Any]] = None
+
+class MolecularGenerationRunResponse(BaseModel):
+    id: int
+    project_id: int
+    target_id: Optional[int] = None
+    run_name: str
+    generation_mode: str
+    generator_name: str
+    generator_version: str
+    status: str
+    random_seed: Optional[int] = None
+    requested_count: int
+    generated_count: int
+    valid_count: int
+    rejected_count: int
+    unique_count: int
+    novel_count: int
+    parameters_json: Optional[Dict[str, Any]] = None
+    filter_config_json: Optional[Dict[str, Any]] = None
+    error_message: Optional[str] = None
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+class GeneratedMoleculeResponse(BaseModel):
+    id: int
+    run_id: int
+    project_id: int
+    target_id: Optional[int] = None
+    compound_code: str
+    smiles: str
+    canonical_smiles: Optional[str] = None
+    inchi: Optional[str] = None
+    inchikey: Optional[str] = None
+    molecular_formula: Optional[str] = None
+    mw: Optional[float] = None
+    logp: Optional[float] = None
+    hbd: Optional[int] = None
+    hba: Optional[int] = None
+    tpsa: Optional[float] = None
+    rotatable_bonds: Optional[int] = None
+    formal_charge: Optional[int] = None
+    heavy_atom_count: Optional[int] = None
+    ring_count: Optional[int] = None
+    chemical_validation_status: str
+    rejection_reason: Optional[str] = None
+    generation_mode: str
+    parent_molecule_smiles: Optional[str] = None
+    passed_all_filters: bool
+    structural_alerts_count: int
+    structural_alerts_json: Optional[Dict[str, Any]] = None
+    max_tanimoto_similarity: Optional[float] = None
+    novelty_category: Optional[str] = None
+    closest_known_compound: Optional[str] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+

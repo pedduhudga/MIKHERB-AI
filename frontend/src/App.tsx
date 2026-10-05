@@ -1,17 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import type { HardwareStatus, Project, Candidate } from './types';
+import type { HardwareStatus, Project, Candidate, TargetProtein } from './types';
 import { ProteinViewer3D } from './components/ProteinViewer3D';
 import { FirebaseAuthButton } from './components/FirebaseAuthButton';
+import { MolecularGeneration } from './components/MolecularGeneration';
 import { api } from './services/api';
 import {
-  Dna, Beaker, FlaskConical, TestTube, Cpu, ShieldAlert, Bot, Plus, Play, ArrowRight
+  Dna, Beaker, FlaskConical, TestTube, Cpu, ShieldAlert, Bot, Plus, Play, ArrowRight, Sparkles
 } from 'lucide-react';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'DISCOVERY' | 'TARGETS' | 'CHEMISTRY' | 'FORMULATION' | 'EXPERIMENTS' | 'AI_LAB'>('DISCOVERY');
+  const [activeTab, setActiveTab] = useState<'DISCOVERY' | 'TARGETS' | 'MOLECULAR_GEN' | 'CHEMISTRY' | 'FORMULATION' | 'EXPERIMENTS' | 'AI_LAB'>('DISCOVERY');
   const [hardware, setHardware] = useState<HardwareStatus | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [targets, setTargets] = useState<TargetProtein[]>([]);
   const [, setCandidates] = useState<Candidate[]>([]);
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
 
@@ -53,7 +55,17 @@ export default function App() {
       if (data.length > 0 && !selectedProject) {
         setSelectedProject(data[0]);
         fetchCandidates(data[0].id);
+        fetchTargets(data[0].id);
       }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const fetchTargets = async (projId: number) => {
+    try {
+      const data = await api.getTargets(projId);
+      setTargets(data);
     } catch (e) {
       console.error(e);
     }
@@ -168,6 +180,7 @@ export default function App() {
         {[
           { id: 'DISCOVERY', label: 'Discovery Projects', icon: Play },
           { id: 'TARGETS', label: 'Targets & Proteins', icon: Dna },
+          { id: 'MOLECULAR_GEN', label: 'Molecular Generation', icon: Sparkles },
           { id: 'CHEMISTRY', label: 'Chemical Libraries', icon: Beaker },
           { id: 'FORMULATION', label: 'Formulation Lab', icon: FlaskConical },
           { id: 'EXPERIMENTS', label: 'Experiments & Trials', icon: TestTube },
@@ -431,6 +444,10 @@ export default function App() {
               </div>
             </div>
           </div>
+        )}
+
+        {activeTab === 'MOLECULAR_GEN' && selectedProject && (
+          <MolecularGeneration project={selectedProject} targets={targets} />
         )}
 
         {activeTab === 'FORMULATION' && (

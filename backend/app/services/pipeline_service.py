@@ -3,7 +3,7 @@ import os
 import traceback
 from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
-from app.models.models import Project, PipelineStage, TargetProtein, ChemicalLibrary, Compound, Candidate
+from app.models.models import Project, PipelineStage, TargetProtein, ChemicalLibrary, Compound, Candidate, GeneratedMolecule
 from app.engines.protein_engine import ProteinEngine, P2RankPocketPredictor
 from app.engines.chemical_engine import ChemicalEngine
 from app.engines.docking_engine import AIDockingEngine
@@ -413,6 +413,20 @@ class DiscoveryPipelineRunner:
                 for comp in curated_real_compounds:
                     if not any(c["code"] == comp["code"] for c in raw_compounds):
                         raw_compounds.append(comp)
+
+            # Integrate candidate molecules from any completed molecular generation runs
+            gen_molecules = self.db.query(GeneratedMolecule).filter_by(
+                project_id=project.id,
+                chemical_validation_status="VALID",
+                passed_all_filters=True
+            ).all()
+            for gm in gen_molecules:
+                if not any(c["code"] == gm.compound_code for c in raw_compounds):
+                    raw_compounds.append({
+                        "code": gm.compound_code,
+                        "name": f"{gm.compound_code} ({gm.generation_mode})",
+                        "smiles": gm.canonical_smiles or gm.smiles
+                    })
 
             processed_comps = self.chemical_engine.build_library(raw_compounds)
 
