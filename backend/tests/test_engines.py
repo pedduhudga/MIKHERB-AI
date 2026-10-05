@@ -69,6 +69,32 @@ def test_chemical_engine_deduplication():
     lib = ce.build_library(comps)
     assert len(lib) == 1
 
+def test_chemical_engine_advanced_filters():
+    ce = ChemicalEngine()
+    parent = ce.remove_salts_get_parent("CC(=O)O.Cl.[Na+]")
+    assert "Cl" not in parent
+
+    desc = ce.calculate_descriptors("CC(=O)Oc1ccccc1C(=O)O")
+    assert "veber_pass" in desc
+    assert "pains_pass" in desc
+    assert desc["veber_pass"] is True
+
+def test_docking_engine_surrogate_isolation():
+    de = AIDockingEngine()
+    res = de.screen_candidate("dummy.pdb", "CC(=O)Oc1ccccc1C(=O)O", [10.0, 20.0, 30.0])
+    if res["boltz"]["status"] == "NOT_INSTALLED":
+        assert res["boltz"]["pKd_predicted"] is None
+        assert "surrogate_heuristic_score" in res["boltz"]
+    if res["gnina"]["status"] == "NOT_INSTALLED":
+        assert res["gnina"]["affinity_kcal_mol"] is None
+        assert "surrogate_heuristic_score" in res["gnina"]
+
+def test_chemical_engine_structural_dissimilarity():
+    ce = ChemicalEngine()
+    comps = [{"code": "C1", "name": "Compound 1", "smiles": "CC(=O)Oc1ccccc1C(=O)O"}]
+    lib = ce.build_library(comps)
+    assert "structural_dissimilarity_score" in lib[0]
+
 def test_consensus_engine_zero_parameters():
     me = MikHerbConsensusScoreEngine()
     score_res = me.calculate_score()

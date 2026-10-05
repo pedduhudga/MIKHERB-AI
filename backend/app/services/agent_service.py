@@ -115,11 +115,22 @@ class AIResearchAgent:
 
                 pocket_center = native_pocket["center"]
                 res = self.docking_engine.screen_candidate(pdb_path, smiles, pocket_center)
+
+                b_status = res["boltz"].get("status") == "COMPLETED"
+                g_status = res["gnina"].get("status") == "COMPLETED"
+
+                if b_status and g_status:
+                    overall_status = "COMPLETED"
+                elif b_status or g_status:
+                    overall_status = "PARTIAL"
+                else:
+                    overall_status = "NOT_AVAILABLE"
+
                 return {
-                    "agent_response": f"Completed native screening. Boltz pKd: {res['boltz'].get('pKd_predicted') or 'NOT_INSTALLED'}, GNINA Affinity: {res['gnina'].get('affinity_kcal_mol') or 'NOT_INSTALLED'} kcal/mol, Pose Agreement: {res['pose_agreement']}.",
+                    "agent_response": f"Screening run (Status: {overall_status}). Boltz pKd: {res['boltz'].get('pKd_predicted') or 'NOT_INSTALLED'}, GNINA Affinity: {res['gnina'].get('affinity_kcal_mol') or 'NOT_INSTALLED'} kcal/mol.",
                     "tool_executed": "boltz_and_gnina",
                     "output_data": res,
-                    "status": "COMPLETED"
+                    "status": overall_status
                 }
             except Exception as e:
                 return {

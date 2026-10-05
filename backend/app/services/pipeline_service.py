@@ -186,19 +186,15 @@ class DiscoveryPipelineRunner:
 
         elif order == 3:
             real_herbicide_queries = [
-                "Imazethapyr",
-                "Chlorimuron-ethyl",
-                "Sulfometuron-methyl",
-                "Flumetsulam",
-                "Florasulam",
-                "Pyrithiobac",
-                "Bispyribac",
-                "Penoxsulam",
-                "Glyphosate",
-                "Atrazine",
-                "Imazapyr",
-                "Chlorsulfuron",
-                "Flumioxazin"
+                # ALS / AHAS Inhibitors
+                "Imazethapyr", "Chlorimuron-ethyl", "Sulfometuron-methyl", "Flumetsulam", "Florasulam",
+                "Pyrithiobac", "Bispyribac", "Penoxsulam", "Chlorsulfuron", "Imazapyr",
+                # HPPD Inhibitors
+                "Mesotrione", "Isoxaflutole", "Tembotrione",
+                # PPO Inhibitors
+                "Flumioxazin", "Fomesafen", "Sulfentrazone",
+                # EPSPS & PSII References
+                "Glyphosate", "Atrazine", "Metribuzin"
             ]
 
             raw_compounds = []
@@ -218,9 +214,11 @@ class DiscoveryPipelineRunner:
                     {"code": "PUBCHEM-CID-5311", "name": "Sulfometuron-methyl (ALS Inhibitor)", "smiles": "CC1=NC(=NC(=N1)NC(=O)NS(=O)(=O)C2=CC=CC=C2C(=O)OC)C"},
                     {"code": "PUBCHEM-CID-91684", "name": "Flumetsulam (ALS Inhibitor)", "smiles": "Cc1cc(F)cc(c1)n2nc3nc(nc3n2)S(=O)(=O)Nc4c(F)cccc4F"},
                     {"code": "PUBCHEM-CID-115132", "name": "Florasulam (ALS Inhibitor)", "smiles": "COc1cc2nc(nc2n1)S(=O)(=O)Nc3c(F)cc(F)c(F)c3F"},
+                    {"code": "PUBCHEM-CID-3723", "name": "Imazapyr (ALS Inhibitor)", "smiles": "CC(C)C1(NC(=O)C2=NC=CC=C21)C(=O)O"},
+                    {"code": "PUBCHEM-CID-17596", "name": "Mesotrione (HPPD Inhibitor)", "smiles": "CS(=O)(=O)c1ccc(c(c1)N(=O)=O)C(=O)C2C(=O)CCCC2=O"},
+                    {"code": "PUBCHEM-CID-92425", "name": "Flumioxazin (PPO Inhibitor)", "smiles": "CC1=CC(=O)C2=C(C=C1)N(C(=O)O2)C3=CC(=C(C=C3F)Cl)F"},
                     {"code": "PUBCHEM-CID-60196", "name": "Glyphosate Reference", "smiles": "C(C(=O)O)NCP(=O)(O)O"},
-                    {"code": "PUBCHEM-CID-2256", "name": "Atrazine Reference", "smiles": "CCNc1nc(nc(n1)Cl)NC(C)C"},
-                    {"code": "PUBCHEM-CID-3723", "name": "Imazapyr Reference", "smiles": "CC(C)C1(NC(=O)C2=NC=CC=C21)C(=O)O"}
+                    {"code": "PUBCHEM-CID-2256", "name": "Atrazine Reference", "smiles": "CCNc1nc(nc(n1)Cl)NC(C)C"}
                 ]
                 for comp in curated_real_compounds:
                     if not any(c["code"] == comp["code"] for c in raw_compounds):
@@ -228,7 +226,7 @@ class DiscoveryPipelineRunner:
 
             processed_comps = self.chemical_engine.build_library(raw_compounds)
 
-            library = ChemicalLibrary(name=f"Real Chemical Discovery Library for Project {project.name}", compound_count=len(processed_comps))
+            library = ChemicalLibrary(name=f"Multi-Target Real Chemical Discovery Library for Project {project.name}", compound_count=len(processed_comps))
             self.db.add(library)
             self.db.commit()
 
@@ -249,7 +247,12 @@ class DiscoveryPipelineRunner:
                 )
                 self.db.add(comp)
             self.db.commit()
-            return {"library_id": library.id, "compounds_screened": len(processed_comps), "source": "PubChem & Real Chemical Database"}
+            return {
+                "library_id": library.id,
+                "compounds_screened": len(processed_comps),
+                "source": "PubChem & Multi-Target Real Chemical Database",
+                "filters_applied": ["Salt Removal", "PAINS Filter", "Lipinski Rule of 5", "Veber Rules", "Morgan Fingerprints"]
+            }
 
         elif order == 4:
             target = self.db.query(TargetProtein).filter_by(project_id=project.id).first()
@@ -409,8 +412,13 @@ class DiscoveryPipelineRunner:
 
                 p_conf = target.pockets_json[0].get("plddt_avg") if (is_weed_p2rank and target.pockets_json) else None
 
+                plddt_val = (target.structure_confidence or 70.0) if target else 70.0
+                crop_div_val = (target.crop_divergence_score or 50.0) if target else 50.0
+                essentiality_val = (target.essentiality_score or 50.0) if target else 50.0
+                dyn_target_relevance = round(min(100.0, max(10.0, (plddt_val * 0.4) + (crop_div_val * 0.3) + (essentiality_val * 0.3))), 1)
+
                 consensus = self.consensus_engine.calculate_score(
-                    target_relevance=80.0,
+                    target_relevance=dyn_target_relevance,
                     pocket_confidence=p_conf,
                     boltz_pKd=boltz_pKd,
                     gnina_cnn_score=gnina_cnn,
