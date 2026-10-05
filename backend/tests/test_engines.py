@@ -503,12 +503,12 @@ def test_consensus_engine_no_safety_boolean():
     me = MikHerbConsensusScoreEngine()
     score_with_none = me.calculate_score(
         target_relevance=70.0,
-        boltz_pKd=7.5,
+        boltz_pIC50=7.5,
         safety_evidence_clean=None
     )
     score_without = me.calculate_score(
         target_relevance=70.0,
-        boltz_pKd=7.5,
+        boltz_pIC50=7.5,
     )
     assert score_with_none["mikherb_score"] == score_without["mikherb_score"], (
         "Passing safety_evidence_clean=None must produce the same score as not passing it at all."
@@ -549,21 +549,25 @@ def test_alphafold_global_metric_value_resolution():
 
 def test_crop_selectivity_engine():
     se = CropSelectivityEngine()
-    res = se.evaluate_selectivity("MAATTT", "MAATSS", weed_affinity_pKd=8.5, crop_affinity_pKd=6.2)
+    res = se.evaluate_selectivity("MAATTT", "MAATSS", weed_pIC50=8.5, crop_pIC50=6.2)
+    assert res["method"] == "Boltz-2 pIC50 Comparison"
+    assert res["weed_pIC50"] == 8.5
+    assert res["crop_pIC50"] == 6.2
+    assert res["pIC50_difference"] == 2.3
+    assert res["IC50_fold_difference"] > 10.0
     assert res["selectivity_fold_difference"] > 10.0
     assert res["selectivity_score"] > 50.0
 
 
 def test_crop_selectivity_none_preserved():
     """None selectivity score must not be coerced to 0.0 anywhere in the pipeline data."""
-    # This tests that the selectivity engine itself returns None when called with None pKd
-    # (the selectivity engine requires valid pKd values — None propagation is in pipeline_service)
     se = CropSelectivityEngine()
-    # If both pKds are present, score is computed
-    res = se.evaluate_selectivity("MAAT", "MAAR", weed_affinity_pKd=7.0, crop_affinity_pKd=7.0)
+    # When weed == crop pIC50, score is 50.0 and IC50_fold_difference is 1.0
+    res = se.evaluate_selectivity("MAAT", "MAAR", weed_pIC50=7.0, crop_pIC50=7.0)
     assert res["selectivity_score"] is not None
-    # Score should be ~50 when weed == crop pKd (no selectivity)
-    assert abs(res["selectivity_score"] - 50.0) < 5.0
+    assert abs(res["selectivity_score"] - 50.0) < 0.1
+    assert res["pIC50_difference"] == 0.0
+    assert res["IC50_fold_difference"] == 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -1517,6 +1521,95 @@ def test_boltz_scientific_validator_fixture_execution(tmp_path):
     with patch("shutil.which", return_value="/usr/local/bin/boltz"), \
          patch("app.engines.docking_engine.Boltz2Adapter.predict_complex", return_value=fail_res):
         assert _validate_boltz() is False
+
+
+def test_pic50_never_stored_as_pkd_in_boltz_output():
+    """
+    Scientific Integrity: Boltz-2 outputs must NEVER contain or expose pKd_predicted.
+    Only pIC50_predicted, predicted_ic50_equivalent_nM, and affinity_raw_log_ic50_uM are allowed.
+    """
+    from app.engines.docking_engine import Boltz2Adapter
+    adapter = Boltz2Adapter()
+
+    # Verify return dictionary keys on all branches:
+    # 1. Pocket center missing branch
+    res_missing_center = adapter.predict_complex("dummy.pdb", "CCO", pocket_center=[])
+    assert "pKd_predicted" not in res_missing_center
+    assert "pIC50_predicted" in res_missing_center
+
+    # 2. Not installed branch
+    with patch("shutil.which", return_value=None):
+        res_not_installed = adapter.predict_complex("dummy.pdb", "CCO", pocket_center=[10.0, 10.0, 10.0])
+        assert "pKd_predicted" not in res_not_installed
+        assert "pIC50_predicted" in res_not_installed
+
+    # 3. Failed input branch
+    with patch("shutil.which", return_value="/usr/local/bin/boltz"), \
+         patch.object(adapter, "extract_sequence_from_pdb", return_value=None):
+        res_failed_input = adapter.predict_complex("dummy.pdb", "CCO", pocket_center=[10.0, 10.0, 10.0], protein_sequence=None)
+        assert "pKd_predicted" not in res_failed_input
+        assert "pIC50_predicted" in res_failed_input
+
+
+def test_selectivity_engine_outputs_strictly_pic50_terminology():
+    """
+    Scientific Integrity: CropSelectivityEngine must report pIC50 terminology throughout,
+    including method, weed_pIC50, crop_pIC50, pIC50_difference, and IC50_fold_difference.
+    Must NOT use weed_affinity_pKd or crop_affinity_pKd.
+    """
+    from app.engines.selectivity_engine import CropSelectivityEngine
+    engine = CropSelectivityEngine()
+
+    res = engine.evaluate_selectivity(
+        weed_seq="MKVLA",
+        crop_seq="MKVLT",
+        weed_pIC50=8.0,
+        crop_pIC50=6.0
+    )
+
+    assert res["method"] == "Boltz-2 pIC50 Comparison"
+    assert res["weed_pIC50"] == 8.0
+    assert res["crop_pIC50"] == 6.0
+    assert res["pIC50_difference"] == 2.0
+    assert res["IC50_fold_difference"] == 100.0
+    assert "weed_affinity_pKd" not in res
+    assert "crop_affinity_pKd" not in res
+
+
+def test_validation_fixture_accession_is_not_an_implicit_project_target():
+    """
+    Scientific Integrity: The validation fixture accession (P69905) used to test
+    external APIs (UniProt, AlphaFold) is a standard external reference and MUST NOT
+    be treated as an implicit target or default candidate in target discovery.
+    """
+    from app.engines.status_manager import UNIPROT_API_TEST_ACCESSION, ALPHAFOLD_API_TEST_ACCESSION
+    from app.engines.target_discovery_engine import TARGET_CATALOGUE
+
+    assert UNIPROT_API_TEST_ACCESSION == "P69905"
+    assert ALPHAFOLD_API_TEST_ACCESSION == "P69905"
+
+    # Verify that the test fixture accession is NEVER an entry in the herbicide target catalogue
+    for gene, info in TARGET_CATALOGUE.items():
+        assert info.get("uniprot_id") != "P69905", f"Fixture accession found in catalogue for {gene}"
+        assert info.get("uniprot_id") != "P10324", f"Legacy accession found as hardcoded ID in catalogue for {gene}"
+
+
+def test_surrogate_values_are_clearly_labelled_heuristic():
+    """
+    Scientific Integrity: RDKitShapeBindingEngine surrogate results must explicitly declare
+    execution_mode = 'SURROGATE_HEURISTIC' and use heuristic_affinity_kcal_mol / heuristic_pKd /
+    surrogate_affinity_score rather than native unadorned pKd.
+    """
+    from app.engines.docking_engine import RDKitShapeBindingEngine
+
+    res = RDKitShapeBindingEngine.calculate_binding_score("dummy.pdb", "CCO", [10.0, 10.0, 10.0])
+    assert res["status"] == "COMPLETED"
+    assert res["execution_mode"] == "SURROGATE_HEURISTIC"
+    assert "heuristic_affinity_kcal_mol" in res
+    assert "heuristic_pKd" in res
+    assert "surrogate_affinity_score" in res
+    assert res["heuristic_pKd"] is not None
+
 
 
 

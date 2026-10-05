@@ -581,7 +581,7 @@ class DiscoveryPipelineRunner:
 
                         if weed_pIC50 is not None and crop_pIC50 is not None:
                             sel_res = self.selectivity_engine.evaluate_selectivity(
-                                target.weed_sequence, target.crop_sequence, weed_affinity_pKd=weed_pIC50, crop_affinity_pKd=crop_pIC50
+                                target.weed_sequence, target.crop_sequence, weed_pIC50=weed_pIC50, crop_pIC50=crop_pIC50
                             )
                             target_sel_results.append({
                                 "target_gene": target.gene,
@@ -589,6 +589,8 @@ class DiscoveryPipelineRunner:
                                 "method": "Boltz-2 pIC50 Comparison",
                                 "weed_pIC50": round(weed_pIC50, 2),
                                 "crop_pIC50": round(crop_pIC50, 2),
+                                "pIC50_difference": sel_res.get("pIC50_difference"),
+                                "IC50_fold_difference": sel_res.get("IC50_fold_difference"),
                                 "selectivity_score": sel_res["selectivity_score"],
                                 "fold_difference": sel_res["selectivity_fold_difference"],
                                 "status": "COMPLETED"
@@ -609,8 +611,8 @@ class DiscoveryPipelineRunner:
                             target_sel_results.append({
                                 "target_gene": target.gene,
                                 "compound_code": comp.compound_code,
-                                "weed_pKd": None,
-                                "crop_pKd": None,
+                                "weed_pIC50": None,
+                                "crop_pIC50": None,
                                 "selectivity_score": None,
                                 "status": "SELECTIVITY_NOT_AVAILABLE_MISSING_DOCKING"
                             })
@@ -620,8 +622,8 @@ class DiscoveryPipelineRunner:
                         target_sel_results.append({
                             "target_gene": target.gene,
                             "compound_code": comp.compound_code,
-                            "weed_pKd": None,
-                            "crop_pKd": None,
+                            "weed_pIC50": None,
+                            "crop_pIC50": None,
                             "selectivity_score": None,
                             "status": "SELECTIVITY_NOT_AVAILABLE_CROP_STRUCTURE_MISSING",
                             "reason": crop_err

@@ -36,7 +36,13 @@ class RDKitShapeBindingEngine:
         """Calculates real 3D steric contact, hydrophobic, and electrostatic interaction affinity."""
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
-            return {"status": "FAILED_INVALID_SMILES", "affinity_kcal_mol": None, "pKd_predicted": None}
+            return {
+                "status": "FAILED_INVALID_SMILES",
+                "affinity_kcal_mol": None,
+                "heuristic_affinity_kcal_mol": None,
+                "heuristic_pKd": None,
+                "surrogate_affinity_score": None
+            }
 
         mol_h = Chem.AddHs(mol)
         res = AllChem.EmbedMolecule(mol_h, AllChem.ETKDG())
@@ -81,16 +87,18 @@ class RDKitShapeBindingEngine:
         affinity_kcal = round(-5.0 + steric_term + hydrophobic_term + rotatable_penalty, 2)
         affinity_kcal = max(-14.0, min(-3.0, affinity_kcal))
 
-        pKd = round(abs(affinity_kcal) / 1.363, 2)
+        heuristic_pkd = round(abs(affinity_kcal) / 1.363, 2)
         confidence = round(min(95.0, max(60.0, 70.0 + (contact_count * 0.5))), 1)
 
         return {
             "engine": "RDKit 3D Conformer Steric Complementarity (Surrogate)",
             "affinity_kcal_mol": affinity_kcal,
-            "pKd_predicted": pKd,
+            "heuristic_affinity_kcal_mol": affinity_kcal,
+            "heuristic_pKd": heuristic_pkd,
+            "surrogate_affinity_score": heuristic_pkd,
             "contacts_in_pocket": contact_count,
             "confidence": confidence,
-            "execution_mode": "OPEN_SOURCE_RDKIT_3D_SURROGATE",
+            "execution_mode": "SURROGATE_HEURISTIC",
             "status": "COMPLETED"
         }
 

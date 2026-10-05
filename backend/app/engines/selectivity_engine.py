@@ -24,21 +24,33 @@ class CropSelectivityEngine:
         self,
         weed_seq: str,
         crop_seq: str,
-        weed_affinity_pKd: float,
-        crop_affinity_pKd: float
+        weed_pIC50: float,
+        crop_pIC50: float
     ) -> Dict[str, Any]:
-        """Calculates selectivity fold difference and score from actual dual docking affinity predictions."""
+        """
+        Calculates selectivity fold difference and score from actual dual docking pIC50 predictions.
+        Method: Boltz-2 pIC50 Comparison.
+        """
         seq_analysis = self.align_sequences(weed_seq, crop_seq)
 
-        # Selectivity fold = 10 ^ (weed_pKd - crop_pKd)
-        kd_diff = weed_affinity_pKd - crop_affinity_pKd
-        selectivity_fold = round(10 ** kd_diff, 1) if kd_diff > 0 else round(1.0 / (10 ** abs(kd_diff)), 2)
+        # Selectivity fold difference from pIC50 difference:
+        # pIC50 = -log10(IC50_M) = 6 - log10(IC50_uM)
+        # Higher pIC50 means higher potency (lower IC50).
+        # IC50_fold_difference (selectivity towards weed vs crop) = 10 ^ (weed_pIC50 - crop_pIC50)
+        pic50_diff = round(weed_pIC50 - crop_pIC50, 3)
+        if pic50_diff > 0:
+            selectivity_fold = round(10 ** pic50_diff, 1)
+        else:
+            selectivity_fold = round(1.0 / (10 ** abs(pic50_diff)), 2)
 
-        selectivity_score = min(100.0, max(0.0, 50.0 + (kd_diff * 25.0)))
+        selectivity_score = min(100.0, max(0.0, 50.0 + (pic50_diff * 25.0)))
 
         return {
-            "weed_affinity_pKd": round(weed_affinity_pKd, 2),
-            "crop_affinity_pKd": round(crop_affinity_pKd, 2),
+            "method": "Boltz-2 pIC50 Comparison",
+            "weed_pIC50": round(weed_pIC50, 2),
+            "crop_pIC50": round(crop_pIC50, 2),
+            "pIC50_difference": pic50_diff,
+            "IC50_fold_difference": selectivity_fold,
             "selectivity_fold_difference": selectivity_fold,
             "selectivity_score": round(selectivity_score, 1),
             "crop_safety_margin": "EXCELLENT" if selectivity_fold >= 10.0 else ("MODERATE" if selectivity_fold >= 3.0 else "POOR"),

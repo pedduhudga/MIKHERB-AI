@@ -76,27 +76,55 @@ def _validate_p2rank() -> bool:
     except Exception:
         return False
 
+# ---------------------------------------------------------------------------
+# Explicit External Service Validation Fixtures (NOT implicit biological targets)
+# Dedicated reference accessions used exclusively to verify external API availability & schemas.
+# These accessions MUST NEVER enter actual target discovery, ranking, or candidate scoring.
+# ---------------------------------------------------------------------------
+UNIPROT_API_TEST_ACCESSION = "P69905"     # Human Hemoglobin subunit alpha (standard universal reference)
+ALPHAFOLD_API_TEST_ACCESSION = "P69905"   # Well-characterized standard reference model in AlphaFold DB
+
 def _validate_uniprot() -> bool:
+    """
+    Validates UniProt REST API connectivity and FASTA payload schema.
+    Uses dedicated external service test accession P69905 (not a platform herbicide target).
+    """
     import requests
     try:
-        r = requests.get("https://rest.uniprot.org/uniprotkb/P10324.fasta", timeout=5)
-        return r.status_code == 200
+        url = f"https://rest.uniprot.org/uniprotkb/{UNIPROT_API_TEST_ACCESSION}.fasta"
+        r = requests.get(url, timeout=5)
+        return r.status_code == 200 and r.text.startswith(">")
     except Exception:
         return False
 
 def _validate_alphafold() -> bool:
+    """
+    Validates AlphaFold EBI prediction API connectivity and JSON schema.
+    Uses dedicated external service test accession P69905 (not a platform herbicide target).
+    """
     import requests
     try:
-        r = requests.get("https://alphafold.ebi.ac.uk/api/prediction/P10324", timeout=5)
-        return r.status_code == 200
+        url = f"https://alphafold.ebi.ac.uk/api/prediction/{ALPHAFOLD_API_TEST_ACCESSION}"
+        r = requests.get(url, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            return isinstance(data, list) and len(data) > 0 and "pdbUrl" in data[0]
+        return False
     except Exception:
         return False
 
 def _validate_pubchem() -> bool:
+    """
+    Validates PubChem PUG-REST API connectivity and JSON response schema.
+    Uses standard reference compound CID 2244 (Aspirin).
+    """
     import requests
     try:
         r = requests.get("https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/2244/property/MolecularWeight/JSON", timeout=5)
-        return r.status_code == 200
+        if r.status_code == 200:
+            data = r.json()
+            return "PropertyTable" in data and "Properties" in data["PropertyTable"]
+        return False
     except Exception:
         return False
 
