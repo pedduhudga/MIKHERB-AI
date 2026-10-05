@@ -127,5 +127,6 @@ export interface GeneratedMolecule {
   max_tanimoto_similarity?: number;
   novelty_category?: string;
   closest_known_compound?: string;
+  pocket_fit_score?: number;
   created_at: string;
 }

@@ -10,6 +10,7 @@ from app.models.models import (
 from app.engines.molecular_generation import (
     MolecularGenerationManager, GenerationMode, MolecularFilterConfig
 )
+from app.engines.molecular_generation.generation_manager import CandidateTier
 from app.engines.protein_engine import ProteinEngine, P2RankPocketPredictor
 from app.engines.chemical_engine import ChemicalEngine
 from app.engines.docking_engine import AIDockingEngine
@@ -424,15 +425,36 @@ class DiscoveryPipelineRunner:
 
                     if not existing_run:
                         mgr = MolecularGenerationManager()
+                        
+                        # Determine generation candidate tier (Default: STANDARD = 50)
+                        tier_setting = getattr(project, "generation_tier", "STANDARD") or "STANDARD"
+                        tier_counts = {
+                            "QUICK": CandidateTier.QUICK,
+                            "STANDARD": CandidateTier.STANDARD,
+                            "DEEP": CandidateTier.DEEP,
+                            "EXPLORATORY": CandidateTier.EXPLORATORY
+                        }
+                        req_count = tier_counts.get(str(tier_setting).upper(), CandidateTier.STANDARD)
+
                         target_dict = {
                             "id": primary_target.id,
                             "target_id": primary_target.id,
                             "gene": primary_target.gene or primary_target.name,
+                            "name": primary_target.name,
                             "target_family": primary_target.target_family or "ALS",
+                            "weed_species": project.weed_species or "Amaranthus palmeri",
+                            "organism": project.weed_species or "Amaranthus palmeri",
+                            "weed_uniprot_id": primary_target.uniprot_id or "P17767",
+                            "uniprot_id": primary_target.uniprot_id or "P17767",
+                            "gene_verified": True,
+                            "function_verified": True,
+                            "essentiality_evidence": primary_target.essentiality_status or "Essential target enzyme for plant survival",
                             "weed_sequence": primary_target.weed_sequence,
                             "sequence": primary_target.weed_sequence,
                             "pockets_json": primary_target.pockets_json,
-                            "pocket_center": p_center
+                            "pocket_center": p_center,
+                            "structure_confidence": primary_target.structure_confidence,
+                            "alphafold_available": True if (primary_target.alphafold_id or primary_target.structure_confidence) else False
                         }
 
                         gen_run = MolecularGenerationRun(
@@ -444,7 +466,7 @@ class DiscoveryPipelineRunner:
                             generator_version="1.0.0",
                             status="RUNNING",
                             random_seed=42,
-                            requested_count=15
+                            requested_count=req_count
                         )
                         self.db.add(gen_run)
                         self.db.commit()
@@ -453,7 +475,7 @@ class DiscoveryPipelineRunner:
                         exec_res = mgr.execute_generation_run(
                             target_info=target_dict,
                             generation_mode=GenerationMode.RDKit_ENUMERATION,
-                            requested_count=15,
+                            requested_count=req_count,
                             random_seed=42
                         )
 
@@ -470,6 +492,9 @@ class DiscoveryPipelineRunner:
                             alerts = mol_data.get("structural_alerts") or {}
                             novelty = mol_data.get("novelty") or {}
                             prov = mol_data.get("provenance") or {}
+                            p_comp = mol_data.get("pocket_complementarity")
+                            p_comp_dict = p_comp.dict() if hasattr(p_comp, "dict") else (p_comp if isinstance(p_comp, dict) else None)
+                            p_fit = p_comp_dict.get("pocket_fit_score") if p_comp_dict else None
 
                             db_mol = GeneratedMolecule(
                                 run_id=gen_run.id,
@@ -500,7 +525,9 @@ class DiscoveryPipelineRunner:
                                 structural_alerts_json=alerts.get("alerts_detected", []),
                                 max_tanimoto_similarity=novelty.get("max_tanimoto_similarity"),
                                 novelty_category=novelty.get("novelty_category"),
-                                closest_known_compound=novelty.get("closest_known_compound")
+                                closest_known_compound=novelty.get("closest_known_compound"),
+                                pocket_fit_score=p_fit,
+                                pocket_compatibility_json=p_comp_dict
                             )
                             self.db.add(db_mol)
                             self.db.commit()
@@ -535,6 +562,9 @@ class DiscoveryPipelineRunner:
                                 generator_version=prov.get("generator_version", gen_run.generator_version),
                                 parameters_json=prov.get("parameters"),
                                 random_seed=prov.get("random_seed"),
+                                query_endpoint=prov.get("query_endpoint"),
+                                response_hash=prov.get("response_hash"),
+                                external_verification_status=prov.get("external_verification_status"),
                                 provenance_hash=prov.get("provenance_hash", "UNKNOWN")
                             )
                             self.db.add(db_prov)

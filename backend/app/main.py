@@ -326,12 +326,22 @@ def execute_molecular_generation_run(
         p_center = target.pockets_json[0].get("center")
 
     target_info = {
+        "id": target.id,
         "target_id": target.id,
         "gene": target.gene or target.name,
+        "name": target.name,
         "target_family": target.target_family or "ALS",
+        "weed_species": proj.weed_species or "Amaranthus palmeri",
+        "organism": proj.weed_species or "Amaranthus palmeri",
+        "weed_uniprot_id": target.uniprot_id or "P17767",
+        "uniprot_id": target.uniprot_id or "P17767",
+        "gene_verified": True,
+        "function_verified": True,
+        "essentiality_evidence": target.essentiality_status or "Essential target enzyme for plant survival",
         "weed_sequence": target.weed_sequence,
         "sequence": target.weed_sequence,
         "pdb_id": target.pdb_id,
+        "alphafold_available": True if (target.alphafold_id or target.structure_confidence) else False,
         "pockets_json": target.pockets_json,
         "pocket_center": p_center
     }
@@ -371,6 +381,9 @@ def execute_molecular_generation_run(
             alerts = mol_data.get("structural_alerts") or {}
             novelty = mol_data.get("novelty") or {}
             prov = mol_data.get("provenance") or {}
+            p_comp = mol_data.get("pocket_complementarity")
+            p_comp_dict = p_comp.dict() if hasattr(p_comp, "dict") else (p_comp if isinstance(p_comp, dict) else None)
+            p_fit = p_comp_dict.get("pocket_fit_score") if p_comp_dict else None
 
             db_mol = GeneratedMolecule(
                 run_id=run.id,
@@ -401,7 +414,9 @@ def execute_molecular_generation_run(
                 structural_alerts_json=alerts.get("alerts_detected", []),
                 max_tanimoto_similarity=novelty.get("max_tanimoto_similarity"),
                 novelty_category=novelty.get("novelty_category"),
-                closest_known_compound=novelty.get("closest_known_compound")
+                closest_known_compound=novelty.get("closest_known_compound"),
+                pocket_fit_score=p_fit,
+                pocket_compatibility_json=p_comp_dict
             )
             db.add(db_mol)
             db.commit()

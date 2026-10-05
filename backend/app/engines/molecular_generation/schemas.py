@@ -101,10 +101,21 @@ class ProvenanceMetadata(BaseModel):
     query_endpoint: Optional[str] = None
     response_hash: Optional[str] = None
     retrieval_method: Optional[str] = None
+    external_verification_status: Optional[str] = None  # VERIFIED_EXTERNAL, LOCAL_REFERENCE_ONLY, NOT_APPLICABLE
     random_seed: Optional[int] = None
     parameters: Dict[str, Any] = {}
     created_at: str
     provenance_hash: Optional[str] = None
+
+class PocketComplementarityResult(BaseModel):
+    pocket_fit_score: float = Field(..., description="Structure-based pocket complementarity score (0.0 to 1.0)")
+    is_pocket_compatible: bool = Field(..., description="Whether candidate satisfies binding pocket volume and pharmacophore constraints")
+    shape_complementarity: float = Field(..., description="Shape and volume match with pocket")
+    electrostatic_complementarity: float = Field(..., description="Charge and H-bond donor/acceptor match with pocket residues")
+    ligand_volume_angstrom3: float = Field(..., description="Estimated ligand volume in Å³")
+    volume_fit_ratio: float = Field(..., description="Ratio of ligand volume to pocket volume")
+    satisfied_interactions: List[str] = Field(default_factory=list, description="Key pocket interactions satisfied")
+    warnings: List[str] = Field(default_factory=list)
 
 class GeneratedMoleculeDetail(BaseModel):
     compound_code: str
@@ -119,6 +130,7 @@ class GeneratedMoleculeDetail(BaseModel):
     passed_all_filters: bool = False
     structural_alerts: Optional[StructuralAlertScreenResult] = None
     novelty: Optional[NoveltyAnalysisResult] = None
+    pocket_complementarity: Optional[PocketComplementarityResult] = None
     provenance: ProvenanceMetadata
 
 class GenerationRunCreateRequest(BaseModel):

@@ -219,6 +219,8 @@ class GeneratedMoleculeResponse(BaseModel):
     max_tanimoto_similarity: Optional[float] = None
     novelty_category: Optional[str] = None
     closest_known_compound: Optional[str] = None
+    pocket_fit_score: Optional[float] = None
+    pocket_compatibility_json: Optional[Any] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

@@ -142,13 +142,21 @@ export const MolecularGeneration: React.FC<Props> = ({ project, targets }) => {
             >
               <option value="RDKit_ENUMERATION">RDKit Chemical Enumeration</option>
               <option value="FRAGMENT_RECOMBINATION">Fragment Recombination (BRICS)</option>
-              <option value="DATABASE_RETRIEVAL">Database Retrieval (PubChem)</option>
+              <option value="DATABASE_RETRIEVAL">Database Retrieval (PubChem & ChEMBL)</option>
               <option value="GENERATIVE_AI_ADAPTER">Generative AI Model Adapter</option>
             </select>
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1">Requested Count (Max 500)</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-medium text-slate-400">Candidate Tier</label>
+              <div className="flex gap-1 text-[10px]">
+                <button type="button" onClick={() => setRequestedCount(10)} className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 hover:bg-slate-700">10 (Quick)</button>
+                <button type="button" onClick={() => setRequestedCount(50)} className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 hover:bg-slate-700">50 (Std)</button>
+                <button type="button" onClick={() => setRequestedCount(100)} className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 hover:bg-slate-700">100 (Deep)</button>
+                <button type="button" onClick={() => setRequestedCount(500)} className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 hover:bg-slate-700">500 (Max)</button>
+              </div>
+            </div>
             <input
               type="number"
               min={1}
@@ -273,6 +281,7 @@ export const MolecularGeneration: React.FC<Props> = ({ project, targets }) => {
                   <th className="p-3 font-medium">MW</th>
                   <th className="p-3 font-medium">LogP</th>
                   <th className="p-3 font-medium">TPSA</th>
+                  <th className="p-3 font-medium">Pocket Fit</th>
                   <th className="p-3 font-medium">Novelty Category</th>
                   <th className="p-3 font-medium">Alert Screen</th>
                   <th className="p-3 font-medium">Validation</th>
@@ -306,6 +315,19 @@ export const MolecularGeneration: React.FC<Props> = ({ project, targets }) => {
                     <td className="p-3 text-slate-300 whitespace-nowrap">{m.mw ? `${m.mw}` : '—'}</td>
                     <td className="p-3 text-slate-300 whitespace-nowrap">{m.logp !== undefined ? `${m.logp}` : '—'}</td>
                     <td className="p-3 text-slate-300 whitespace-nowrap">{m.tpsa ? `${m.tpsa} Å²` : '—'}</td>
+                    <td className="p-3 whitespace-nowrap">
+                      {m.pocket_fit_score !== undefined && m.pocket_fit_score !== null ? (
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+                          m.pocket_fit_score >= 0.70 ? 'bg-emerald-950 text-emerald-300' :
+                          m.pocket_fit_score >= 0.50 ? 'bg-blue-950 text-blue-300' :
+                          'bg-slate-800 text-slate-400'
+                        }`}>
+                          {(m.pocket_fit_score * 100).toFixed(0)}%
+                        </span>
+                      ) : (
+                        <span className="text-slate-500 text-xs">—</span>
+                      )}
+                    </td>
                     <td className="p-3 whitespace-nowrap">
                       {m.novelty_category ? (
                         <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${

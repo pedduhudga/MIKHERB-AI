@@ -274,6 +274,8 @@ class GeneratedMolecule(Base):
     max_tanimoto_similarity = Column(Float, nullable=True)
     novelty_category = Column(String, nullable=True)
     closest_known_compound = Column(String, nullable=True)
+    pocket_fit_score = Column(Float, nullable=True)
+    pocket_compatibility_json = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     run = relationship("MolecularGenerationRun", back_populates="molecules")
@@ -321,7 +323,12 @@ class MoleculeProvenance(Base):
     generator_version = Column(String, nullable=False)
     parameters_json = Column(JSON, nullable=True)
     random_seed = Column(Integer, nullable=True)
+    query_endpoint = Column(String, nullable=True)
+    response_hash = Column(String, nullable=True)
+    external_verification_status = Column(String, nullable=True)
     provenance_hash = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    molecule = relationship("GeneratedMolecule", back_populates="provenance_record")
 
     molecule = relationship("GeneratedMolecule", back_populates="provenance_record")

@@ -32,7 +32,8 @@ class GenerationProvenanceTracker:
         source_url: Optional[str] = None,
         query_endpoint: Optional[str] = None,
         response_hash: Optional[str] = None,
-        retrieval_method: Optional[str] = None
+        retrieval_method: Optional[str] = None,
+        external_verification_status: Optional[str] = None
     ) -> ProvenanceMetadata:
         created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
         
@@ -58,6 +59,7 @@ class GenerationProvenanceTracker:
             "query_endpoint": query_endpoint,
             "response_hash": response_hash,
             "retrieval_method": retrieval_method,
+            "external_verification_status": external_verification_status,
             "created_at": created_at
         }
 
@@ -80,6 +82,7 @@ class GenerationProvenanceTracker:
             query_endpoint=query_endpoint,
             response_hash=response_hash,
             retrieval_method=retrieval_method,
+            external_verification_status=external_verification_status,
             random_seed=random_seed,
             parameters=parameters,
             created_at=created_at,

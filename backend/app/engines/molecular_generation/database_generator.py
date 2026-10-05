@@ -122,6 +122,99 @@ class DatabaseRetrievalGenerator(BaseMolecularGenerator):
             logger.debug(f"PubChem REST API query for {compound_name} failed: {e}")
         return None
 
+    def _query_chembl_bioactivity_api(
+        self,
+        gene: str,
+        uniprot_id: Optional[str] = None,
+        timeout: int = 5
+    ) -> List[Dict[str, Any]]:
+        """
+        Dynamically searches ChEMBL REST API for target bioactivity records (IC50, Ki, Kd)
+        and associated confirmed chemical inhibitor ligands.
+        """
+        chembl_compounds = []
+        try:
+            # 1. Resolve ChEMBL target ID via UniProt accession or gene query
+            target_chembl_id = None
+            if uniprot_id:
+                t_url = f"https://www.ebi.ac.uk/chembl/api/data/target.json?target_components__accession={uniprot_id.strip()}&limit=1"
+                resp = requests.get(t_url, timeout=timeout)
+                if resp.status_code == 200:
+                    targets = resp.json().get("targets", [])
+                    if targets:
+                        target_chembl_id = targets[0].get("target_chembl_id")
+
+            if not target_chembl_id and gene:
+                encoded_gene = urllib.parse.quote(gene.strip())
+                t_url = f"https://www.ebi.ac.uk/chembl/api/data/target/search.json?q={encoded_gene}&limit=2"
+                resp = requests.get(t_url, timeout=timeout)
+                if resp.status_code == 200:
+                    targets = resp.json().get("targets", [])
+                    if targets:
+                        target_chembl_id = targets[0].get("target_chembl_id")
+
+            if not target_chembl_id:
+                return []
+
+            # 2. Query bioactivities (IC50, Ki, Kd) for the identified ChEMBL target
+            act_url = f"https://www.ebi.ac.uk/chembl/api/data/activity.json?target_chembl_id={target_chembl_id}&standard_type__in=IC50,Ki,Kd&limit=15"
+            act_resp = requests.get(act_url, timeout=timeout)
+            if act_resp.status_code == 200:
+                raw_bytes = act_resp.content
+                resp_hash = hashlib.sha256(raw_bytes).hexdigest()
+                acts = act_resp.json().get("activities", [])
+                
+                for act in acts:
+                    mol_chembl_id = act.get("molecule_chembl_id")
+                    canonical_smiles = act.get("canonical_smiles")
+                    if not canonical_smiles or not mol_chembl_id:
+                        continue
+                    
+                    std_type = act.get("standard_type")
+                    std_val = act.get("standard_value")
+                    std_units = act.get("standard_units")
+                    
+                    mol = Chem.MolFromSmiles(canonical_smiles)
+                    if not mol:
+                        continue
+                    clean_smi = Chem.MolToSmiles(mol, canonical=True)
+                    formula = rdMolDescriptors.CalcMolFormula(mol)
+                    mw = round(Descriptors.MolWt(mol), 2)
+                    try:
+                        inchi_str = inchi.MolToInchi(mol)
+                        inchikey_str = inchi.MolToInchiKey(mol)
+                    except Exception:
+                        inchi_str = None
+                        inchikey_str = None
+
+                    chembl_compounds.append({
+                        "compound_id": f"ChEMBL-{mol_chembl_id}",
+                        "name": f"ChEMBL Active ({mol_chembl_id})",
+                        "source_database": "ChEMBL",
+                        "source_compound_id": mol_chembl_id,
+                        "source_url": f"https://www.ebi.ac.uk/chembl/compound_report_card/{mol_chembl_id}/",
+                        "query_endpoint": act_url,
+                        "response_hash": resp_hash,
+                        "retrieval_method": "CHEMBL_BIOACTIVITY_REST_API",
+                        "external_verification_status": "VERIFIED_EXTERNAL",
+                        "bioactivity_type": std_type,
+                        "bioactivity_value": float(std_val) if std_val else None,
+                        "bioactivity_units": std_units or "nM",
+                        "smiles": clean_smi,
+                        "canonical_smiles": clean_smi,
+                        "inchi": inchi_str,
+                        "inchikey": inchikey_str,
+                        "molecular_formula": formula,
+                        "molecular_weight": mw,
+                        "generation_mode": GenerationMode.DATABASE_RETRIEVAL.value,
+                        "generator_name": self.name,
+                        "generator_version": self.version,
+                        "retrieved_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                    })
+        except Exception as e:
+            logger.debug(f"ChEMBL bioactivity retrieval query failed: {e}")
+        return chembl_compounds
+
     def generate(
         self,
         target_info: Dict[str, Any],
@@ -139,14 +232,28 @@ class DatabaseRetrievalGenerator(BaseMolecularGenerator):
             }
 
         target_family = target_info.get("target_family") or target_info.get("family") or "ALS"
-        benchmark_entries = KNOWN_TARGET_LIGANDS.get(target_family, KNOWN_TARGET_LIGANDS.get("ALS", []))
+        gene = target_info.get("gene") or target_info.get("name") or "ALS"
+        uniprot_id = target_info.get("uniprot_id") or target_info.get("weed_uniprot_id")
 
+        benchmark_entries = KNOWN_TARGET_LIGANDS.get(target_family, KNOWN_TARGET_LIGANDS.get("ALS", []))
         prefer_live = parameters.get("prefer_live_api", True)
         retrieved_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
         molecules: List[Dict[str, Any]] = []
+        seen_smiles = set()
 
-        # Attempt dynamic PubChem retrieval for the target family's known active compounds
-        for item in benchmark_entries[:max_candidates]:
+        # 1. Attempt dynamic ChEMBL bioactivity retrieval if live API preferred
+        if prefer_live:
+            chembl_hits = self._query_chembl_bioactivity_api(gene=gene, uniprot_id=uniprot_id, timeout=4)
+            for c_hit in chembl_hits:
+                smi = c_hit.get("canonical_smiles")
+                if smi and smi not in seen_smiles and len(molecules) < max_candidates:
+                    seen_smiles.add(smi)
+                    molecules.append(c_hit)
+
+        # 2. Attempt dynamic PubChem retrieval for the target family's known active compounds
+        for item in benchmark_entries:
+            if len(molecules) >= max_candidates:
+                break
             c_name = item.get("name")
             live_pubchem = None
             if prefer_live and c_name:
@@ -159,6 +266,7 @@ class DatabaseRetrievalGenerator(BaseMolecularGenerator):
                 query_endpoint = live_pubchem["endpoint"]
                 response_hash = live_pubchem["response_hash"]
                 retrieval_method = "PUBCHEM_REST_API"
+                external_status = "VERIFIED_EXTERNAL"
                 source_url = f"https://pubchem.ncbi.nlm.nih.gov/compound/{cid}"
                 formula = live_pubchem.get("formula")
                 mw = live_pubchem.get("mw")
@@ -171,6 +279,7 @@ class DatabaseRetrievalGenerator(BaseMolecularGenerator):
                 query_endpoint = "local_curated_benchmark"
                 response_hash = hashlib.sha256(canonical_smi.encode()).hexdigest()
                 retrieval_method = "LOCAL_CURATED_BENCHMARK"
+                external_status = "LOCAL_REFERENCE_ONLY"
                 source_url = f"https://pubchem.ncbi.nlm.nih.gov/compound/{cid}" if cid != "UNKNOWN" else None
 
                 mol = Chem.MolFromSmiles(canonical_smi)
@@ -186,6 +295,10 @@ class DatabaseRetrievalGenerator(BaseMolecularGenerator):
                     inchi_str = None
                     inchikey_str = None
 
+            if canonical_smi in seen_smiles:
+                continue
+            seen_smiles.add(canonical_smi)
+
             db_name = item.get("db", "PubChem")
             molecules.append({
                 "compound_id": f"{db_name}-CID-{cid}",
@@ -196,6 +309,7 @@ class DatabaseRetrievalGenerator(BaseMolecularGenerator):
                 "query_endpoint": query_endpoint,
                 "response_hash": response_hash,
                 "retrieval_method": retrieval_method,
+                "external_verification_status": external_status,
                 "smiles": canonical_smi,
                 "canonical_smiles": canonical_smi,
                 "inchi": inchi_str,

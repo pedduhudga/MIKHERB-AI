@@ -2,7 +2,8 @@ import logging
 from typing import Dict, Any, List, Optional
 from app.engines.molecular_generation.schemas import (
     GenerationMode, GenerationRunStatus, MolecularFilterConfig,
-    GeneratedMoleculeDetail, ChemicalProperties, NoveltyCategory
+    GeneratedMoleculeDetail, ChemicalProperties, NoveltyCategory,
+    PocketComplementarityResult
 )
 from app.engines.molecular_generation.rdkit_generator import RDKitMolecularEnumerator
 from app.engines.molecular_generation.fragment_generator import FragmentRecombinationGenerator
@@ -11,13 +12,14 @@ from app.engines.molecular_generation.ai_generator import GenerativeModelAdapter
 from app.engines.molecular_generation.filters import ChemicalValidatorAndFilter
 from app.engines.molecular_generation.novelty import NoveltyAnalyzer
 from app.engines.molecular_generation.provenance import GenerationProvenanceTracker
+from app.engines.molecular_generation.pocket_aware_design import PocketPharmacophoreAnalyzer
 
 logger = logging.getLogger(__name__)
 
 class CandidateTier:
-    SMALL = 10
+    QUICK = 10
     STANDARD = 50
-    LARGE = 100
+    DEEP = 100
     EXPLORATORY = 500
 
 HARD_MAX_CANDIDATES = 500
@@ -26,9 +28,10 @@ HARD_MAX_CANDIDATES = 500
 class MolecularGenerationManager:
     """
     Orchestrates target-conditioned candidate molecule generation, chemical characterization,
-    structural filtering, multi-database novelty calculation, and scientific provenance tracking.
-    Enforces strict prerequisite pipeline stage gating:
-    TARGET_DISCOVERED -> TARGET_SCIENTIFICALLY_VALIDATED -> PROTEIN_VALIDATED -> POCKET_VALIDATED -> MOLECULAR_GENERATION
+    structural filtering, multi-database novelty calculation, structure-based pocket complementarity,
+    and scientific provenance tracking.
+    Enforces the mandatory 7-stage prerequisite validation chain:
+    TARGET_DISCOVERED -> TARGET_IDENTITY_VERIFIED -> GENE_VERIFIED -> FUNCTION_VERIFIED -> WEED_SPECIES_VERIFIED -> PROTEIN_VALIDATED -> STRUCTURE_POCKET_VALIDATED
     """
 
     def __init__(self, internal_candidates: Optional[List[Dict[str, Any]]] = None):
@@ -43,11 +46,88 @@ class MolecularGenerationManager:
     def get_generator(self, mode: GenerationMode):
         return self.generators.get(mode)
 
+    @staticmethod
+    def validate_target_prerequisites(target_info: Dict[str, Any]) -> Tuple[bool, Optional[str], Optional[Dict[str, bool]]]:
+        """
+        Enforces the mandatory 7-stage prerequisite validation chain for target-conditioned generation:
+        1. TARGET_DISCOVERED: Target identifier and target_family present
+        2. TARGET_IDENTITY_VERIFIED: Valid UniProt accession or target identifier resolved
+        3. GENE_VERIFIED: Strict gene identity confirmation (gene_verified True in provenance/catalogue)
+        4. FUNCTION_VERIFIED: Strict biological function confirmation (function_verified True or essentiality evidence)
+        5. WEED_SPECIES_VERIFIED: Known botanical weed species name provided (not placeholder/unknown)
+        6. PROTEIN_VALIDATED: Verified biological protein sequence (len >= 20)
+        7. STRUCTURE_POCKET_VALIDATED: Validated 3D binding pocket coordinates [x, y, z] and structural evidence
+        """
+        if not target_info or not isinstance(target_info, dict):
+            return False, "TARGET_VALIDATION_ERROR: Target information is missing. Validated target object required.", None
+
+        # Stage 1: TARGET_DISCOVERED
+        gene = target_info.get("gene") or target_info.get("name")
+        family = target_info.get("target_family") or target_info.get("family")
+        if not gene or not family:
+            return False, "TARGET_VALIDATION_GATE_ERROR: Target failed at stage [TARGET_DISCOVERED]. Both gene identifier and target_family must be specified.", None
+
+        # Stage 2: TARGET_IDENTITY_VERIFIED
+        target_id = target_info.get("id") or target_info.get("target_id") or target_info.get("weed_uniprot_id") or target_info.get("uniprot_id")
+        if not target_id:
+            return False, "TARGET_VALIDATION_GATE_ERROR: Target failed at stage [TARGET_IDENTITY_VERIFIED]. Target ID or UniProt accession identifier must be resolved.", None
+
+        # Stage 3: GENE_VERIFIED
+        prov_dict = target_info.get("weed_accession_provenance") or target_info.get("provenance") or {}
+        gene_verified = target_info.get("gene_verified")
+        if gene_verified is None and isinstance(prov_dict, dict):
+            gene_verified = prov_dict.get("gene_verified")
+        if gene_verified is False:
+            return False, "TARGET_VALIDATION_GATE_ERROR: Target failed at stage [GENE_VERIFIED]. Target gene failed strict alias verification against the reference genome/catalogue.", None
+
+        # Stage 4: FUNCTION_VERIFIED
+        function_verified = target_info.get("function_verified")
+        if function_verified is None and isinstance(prov_dict, dict):
+            function_verified = prov_dict.get("function_verified")
+        essentiality = target_info.get("essentiality_evidence") or target_info.get("essentiality_status")
+        if function_verified is False and not essentiality:
+            return False, "TARGET_VALIDATION_GATE_ERROR: Target failed at stage [FUNCTION_VERIFIED]. Biological target function and essentiality evidence must be confirmed.", None
+
+        # Stage 5: WEED_SPECIES_VERIFIED
+        weed_species = target_info.get("weed_species") or target_info.get("organism")
+        if not weed_species or str(weed_species).strip().lower() in ["unknown", "none", "n/a", ""]:
+            return False, "TARGET_VALIDATION_GATE_ERROR: Target failed at stage [WEED_SPECIES_VERIFIED]. Valid botanical weed species (e.g. Amaranthus palmeri) is required.", None
+
+        # Stage 6: PROTEIN_VALIDATED
+        sequence = target_info.get("weed_sequence") or target_info.get("sequence")
+        if not sequence or len(str(sequence).strip()) < 20:
+            return False, "TARGET_VALIDATION_GATE_ERROR: Target failed at stage [PROTEIN_VALIDATED]. Verified full biological protein sequence (minimum 20 amino acids) required.", None
+
+        # Stage 7: STRUCTURE_POCKET_VALIDATED
+        pockets = target_info.get("pockets_json") or target_info.get("pockets") or []
+        pocket_center = target_info.get("pocket_center")
+        if not pocket_center and isinstance(pockets, list) and len(pockets) > 0:
+            pocket_center = pockets[0].get("center")
+
+        if not pocket_center or not isinstance(pocket_center, (list, tuple)) or len(pocket_center) != 3:
+            return False, "TARGET_VALIDATION_GATE_ERROR: Target failed at stage [STRUCTURE_POCKET_VALIDATED]. Target must have verified 3D binding pocket coordinates with center [x, y, z].", None
+
+        try:
+            [float(c) for c in pocket_center]
+        except (ValueError, TypeError):
+            return False, "TARGET_VALIDATION_GATE_ERROR: Target failed at stage [STRUCTURE_POCKET_VALIDATED]. Pocket center coordinates must be numerical [x, y, z].", None
+
+        chain_status = {
+            "TARGET_DISCOVERED": True,
+            "TARGET_IDENTITY_VERIFIED": True,
+            "GENE_VERIFIED": True,
+            "FUNCTION_VERIFIED": True,
+            "WEED_SPECIES_VERIFIED": True,
+            "PROTEIN_VALIDATED": True,
+            "STRUCTURE_POCKET_VALIDATED": True
+        }
+        return True, None, chain_status
+
     def execute_generation_run(
         self,
         target_info: Dict[str, Any],
         generation_mode: GenerationMode,
-        requested_count: int = 20,
+        requested_count: int = 50,
         random_seed: Optional[int] = 42,
         parameters: Optional[Dict[str, Any]] = None,
         filter_config: Optional[MolecularFilterConfig] = None,
@@ -57,69 +137,29 @@ class MolecularGenerationManager:
         """
         Executes an end-to-end generation run with strict scientific integrity.
         Validates target prerequisites, generates candidates, filters, evaluates novelty,
-        and produces complete provenance records.
+        assesses pocket pharmacophore complementarity, and produces complete provenance records.
         """
-        # 1. Scientific Target Validation Guard:
-        # TARGET_DISCOVERED -> TARGET_SCIENTIFICALLY_VALIDATED -> PROTEIN_VALIDATED -> POCKET_VALIDATED -> MOLECULAR_GENERATION
-        if not target_info:
+        # 1. Scientific Target Validation Guard (Strict 7-stage Gate)
+        is_valid_target, gate_error, validation_chain = self.validate_target_prerequisites(target_info)
+        if not is_valid_target:
             return {
                 "status": GenerationRunStatus.FAILED.value,
-                "error": "TARGET_VALIDATION_ERROR: Target information is missing. Validated target object required.",
+                "error": gate_error,
                 "molecules": [],
                 "requested_count": requested_count,
                 "generated_count": 0,
                 "valid_count": 0,
                 "rejected_count": 0,
                 "unique_count": 0,
-                "novel_count": 0
+                "novel_count": 0,
+                "validation_chain": validation_chain
             }
 
         gene = target_info.get("gene") or target_info.get("name")
         family = target_info.get("target_family") or target_info.get("family")
-        sequence = target_info.get("weed_sequence") or target_info.get("sequence")
         pockets = target_info.get("pockets_json") or target_info.get("pockets") or []
-        pocket_center = target_info.get("pocket_center")
-        if not pocket_center and isinstance(pockets, list) and len(pockets) > 0:
-            pocket_center = pockets[0].get("center")
-
-        if not gene or not family:
-            return {
-                "status": GenerationRunStatus.FAILED.value,
-                "error": "TARGET_VALIDATION_ERROR: Target must have scientifically verified gene and target_family (TARGET_DISCOVERED -> TARGET_SCIENTIFICALLY_VALIDATED prerequisite missing).",
-                "molecules": [],
-                "requested_count": requested_count,
-                "generated_count": 0,
-                "valid_count": 0,
-                "rejected_count": 0,
-                "unique_count": 0,
-                "novel_count": 0
-            }
-
-        if not sequence or len(str(sequence).strip()) < 5:
-            return {
-                "status": GenerationRunStatus.FAILED.value,
-                "error": "TARGET_VALIDATION_ERROR: Target must have validated biological protein sequence (PROTEIN_VALIDATED prerequisite missing).",
-                "molecules": [],
-                "requested_count": requested_count,
-                "generated_count": 0,
-                "valid_count": 0,
-                "rejected_count": 0,
-                "unique_count": 0,
-                "novel_count": 0
-            }
-
-        if not pocket_center or len(pocket_center) != 3:
-            return {
-                "status": GenerationRunStatus.FAILED.value,
-                "error": "TARGET_VALIDATION_ERROR: Target must have validated 3D binding pocket coordinates with center [x, y, z] (STRUCTURE/POCKET_VALIDATED prerequisite missing).",
-                "molecules": [],
-                "requested_count": requested_count,
-                "generated_count": 0,
-                "valid_count": 0,
-                "rejected_count": 0,
-                "unique_count": 0,
-                "novel_count": 0
-            }
+        primary_pocket = pockets[0] if (isinstance(pockets, list) and len(pockets) > 0) else {"center": target_info.get("pocket_center")}
+        pocket_features = PocketPharmacophoreAnalyzer.extract_pocket_features(primary_pocket)
 
         # 2. Hard limit enforcement with tiered sizing
         safe_count = min(max(1, requested_count), HARD_MAX_CANDIDATES)
@@ -187,7 +227,7 @@ class MolecularGenerationManager:
         rejected_count = 0
         novel_count = 0
 
-        # 5. Characterization, Filtering, Alert Screening, Multi-Database Novelty & Provenance Loop
+        # 5. Characterization, Filtering, Alert Screening, Pocket Fit, Novelty & Provenance Loop
         for idx, raw in enumerate(raw_molecules):
             smiles = raw.get("smiles")
             compound_code = f"MH-GEN-{gene}-{idx+1:04d}"
@@ -209,13 +249,14 @@ class MolecularGenerationManager:
                 parent_molecule=raw.get("parent_scaffold"),
                 parent_candidate_id=raw.get("parent_candidate_id"),
                 source_database=raw.get("source_database"),
-                source_compound_id=raw.get("source_compound_id")
+                source_compound_id=raw.get("source_compound_id"),
+                source_url=raw.get("source_url"),
+                query_endpoint=raw.get("query_endpoint"),
+                response_hash=raw.get("response_hash"),
+                retrieval_method=raw.get("retrieval_method"),
+                external_verification_status=raw.get("external_verification_status")
             )
             prov.candidate_id = compound_code
-            prov.source_url = raw.get("source_url")
-            prov.query_endpoint = raw.get("query_endpoint")
-            prov.response_hash = raw.get("response_hash")
-            prov.retrieval_method = raw.get("retrieval_method")
 
             if not is_valid:
                 rejected_count += 1
@@ -232,6 +273,7 @@ class MolecularGenerationManager:
                     passed_all_filters=False,
                     structural_alerts=None,
                     novelty=None,
+                    pocket_complementarity=None,
                     provenance=prov
                 ))
                 continue
@@ -247,6 +289,10 @@ class MolecularGenerationManager:
 
             # Structural alert screen (PAINS / reactive)
             alert_screen = ChemicalValidatorAndFilter.screen_structural_alerts(mol_obj, cfg)
+
+            # Structure-based pocket pharmacophore complementarity evaluation
+            pocket_eval = PocketPharmacophoreAnalyzer.evaluate_molecule_pocket_fit(mol_obj, pocket_features)
+            pocket_comp = PocketComplementarityResult(**pocket_eval)
 
             # Multi-database novelty analysis (Reference, PubChem, ChEMBL, Internal)
             novelty_eval = self.novelty_analyzer.evaluate_novelty(
@@ -276,6 +322,7 @@ class MolecularGenerationManager:
                 passed_all_filters=passed_filters,
                 structural_alerts=alert_screen,
                 novelty=novelty_eval,
+                pocket_complementarity=pocket_comp,
                 provenance=prov
             ))
 

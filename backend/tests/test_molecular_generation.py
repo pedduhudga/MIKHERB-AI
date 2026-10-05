@@ -299,10 +299,16 @@ def test_generative_ai_adapter_lifecycle_tiers():
 # 9. Target Validation Gate & Candidate Limit Tests
 # ===========================================================================
 
-def test_molecular_generation_manager_strict_target_validation_gate():
+def test_molecular_generation_manager_strict_7_stage_target_validation_gate():
     """
-    MolecularGenerationManager requires complete target discovery prerequisites:
-    verified gene, sequence, and 3D pocket coordinates.
+    MolecularGenerationManager enforces the mandatory 7-stage prerequisite validation chain:
+    1. TARGET_DISCOVERED
+    2. TARGET_IDENTITY_VERIFIED
+    3. GENE_VERIFIED
+    4. FUNCTION_VERIFIED
+    5. WEED_SPECIES_VERIFIED
+    6. PROTEIN_VALIDATED
+    7. STRUCTURE_POCKET_VALIDATED
     """
     manager = MolecularGenerationManager()
 
@@ -311,45 +317,119 @@ def test_molecular_generation_manager_strict_target_validation_gate():
     assert res1["status"] == GenerationRunStatus.FAILED.value
     assert "TARGET_VALIDATION_ERROR" in res1["error"]
 
-    # 2. Missing biological sequence
-    res2 = manager.execute_generation_run(
-        target_info={"gene": "ALS", "target_family": "ALS", "pockets_json": [{"center": [1.0, 2.0, 3.0]}]},
+    # 2. Stage 1: Missing gene or target_family
+    res_s1 = manager.execute_generation_run(
+        target_info={"id": 1, "weed_species": "Amaranthus palmeri", "sequence": "MVKLAARSTPGRSVVTALKP"},
         generation_mode=GenerationMode.RDKit_ENUMERATION
     )
-    assert res2["status"] == GenerationRunStatus.FAILED.value
-    assert "protein sequence" in res2["error"].lower()
+    assert res_s1["status"] == GenerationRunStatus.FAILED.value
+    assert "TARGET_DISCOVERED" in res_s1["error"]
 
-    # 3. Missing 3D pocket coordinates
-    res3 = manager.execute_generation_run(
-        target_info={"gene": "ALS", "target_family": "ALS", "weed_sequence": "MVKLA"},
+    # 3. Stage 2: Missing target ID / UniProt accession
+    res_s2 = manager.execute_generation_run(
+        target_info={"gene": "ALS", "target_family": "ALS", "weed_species": "Amaranthus palmeri", "sequence": "MVKLAARSTPGRSVVTALKP"},
         generation_mode=GenerationMode.RDKit_ENUMERATION
     )
-    assert res3["status"] == GenerationRunStatus.FAILED.value
-    assert "3d binding pocket" in res3["error"].lower()
+    assert res_s2["status"] == GenerationRunStatus.FAILED.value
+    assert "TARGET_IDENTITY_VERIFIED" in res_s2["error"]
 
-    # 4. Valid target satisfies all prerequisites
-    res4 = manager.execute_generation_run(
+    # 4. Stage 3: Explicitly unverified gene
+    res_s3 = manager.execute_generation_run(
         target_info={
-            "gene": "ALS",
-            "target_family": "ALS",
-            "weed_sequence": "MVKLAARSTP",
-            "pockets_json": [{"center": [12.0, 15.0, 18.0]}]
+            "id": 1, "gene": "ALS", "target_family": "ALS", "gene_verified": False,
+            "weed_species": "Amaranthus palmeri", "sequence": "MVKLAARSTPGRSVVTALKP"
         },
+        generation_mode=GenerationMode.RDKit_ENUMERATION
+    )
+    assert res_s3["status"] == GenerationRunStatus.FAILED.value
+    assert "GENE_VERIFIED" in res_s3["error"]
+
+    # 5. Stage 4: Unverified function
+    res_s4 = manager.execute_generation_run(
+        target_info={
+            "id": 1, "gene": "ALS", "target_family": "ALS", "function_verified": False,
+            "weed_species": "Amaranthus palmeri", "sequence": "MVKLAARSTPGRSVVTALKP"
+        },
+        generation_mode=GenerationMode.RDKit_ENUMERATION
+    )
+    assert res_s4["status"] == GenerationRunStatus.FAILED.value
+    assert "FUNCTION_VERIFIED" in res_s4["error"]
+
+    # 6. Stage 5: Missing or unknown weed species
+    res_s5 = manager.execute_generation_run(
+        target_info={
+            "id": 1, "gene": "ALS", "target_family": "ALS",
+            "weed_species": "Unknown", "sequence": "MVKLAARSTPGRSVVTALKP"
+        },
+        generation_mode=GenerationMode.RDKit_ENUMERATION
+    )
+    assert res_s5["status"] == GenerationRunStatus.FAILED.value
+    assert "WEED_SPECIES_VERIFIED" in res_s5["error"]
+
+    # 7. Stage 6: Missing or short peptide sequence (< 20 amino acids)
+    res_s6 = manager.execute_generation_run(
+        target_info={
+            "id": 1, "gene": "ALS", "target_family": "ALS",
+            "weed_species": "Amaranthus palmeri",
+            "sequence": "MVKLA",  # Only 5 amino acids, rejected
+            "pockets_json": [{"center": [1.0, 2.0, 3.0]}]
+        },
+        generation_mode=GenerationMode.RDKit_ENUMERATION
+    )
+    assert res_s6["status"] == GenerationRunStatus.FAILED.value
+    assert "PROTEIN_VALIDATED" in res_s6["error"]
+
+    # 8. Stage 7: Missing 3D pocket coordinates
+    res_s7 = manager.execute_generation_run(
+        target_info={
+            "id": 1, "gene": "ALS", "target_family": "ALS",
+            "weed_species": "Amaranthus palmeri",
+            "sequence": "MVKLAARSTPGRSVVTALKPALSD"
+        },
+        generation_mode=GenerationMode.RDKit_ENUMERATION
+    )
+    assert res_s7["status"] == GenerationRunStatus.FAILED.value
+    assert "STRUCTURE_POCKET_VALIDATED" in res_s7["error"]
+
+    # 9. Complete valid target satisfies all 7 prerequisite gates
+    valid_target = {
+        "id": 101,
+        "target_id": 101,
+        "gene": "ALS",
+        "name": "Acetohydroxyacid synthase",
+        "target_family": "ALS",
+        "weed_species": "Amaranthus palmeri",
+        "uniprot_id": "A0A890DLI3",
+        "gene_verified": True,
+        "function_verified": True,
+        "essentiality_evidence": "Branched-chain amino acid pathway",
+        "weed_sequence": "MVKLAARSTPGRSVVTALKPALSDQ",
+        "pockets_json": [{"center": [12.0, 15.0, 18.0], "residues": ["SER", "ASP", "LYS", "TYR", "VAL"]}]
+    }
+    res_valid = manager.execute_generation_run(
+        target_info=valid_target,
         generation_mode=GenerationMode.RDKit_ENUMERATION,
         requested_count=5,
         random_seed=42
     )
-    assert res4["status"] == GenerationRunStatus.COMPLETED.value
-    assert res4["valid_count"] > 0
+    assert res_valid["status"] == GenerationRunStatus.COMPLETED.value
+    assert res_valid["valid_count"] > 0
+    # Structure-based pocket complementarity must be evaluated
+    mol_1 = res_valid["molecules"][0]
+    assert mol_1.pocket_complementarity is not None
+    assert 0.0 <= mol_1.pocket_complementarity.pocket_fit_score <= 1.0
+    assert mol_1.pocket_complementarity.shape_complementarity >= 0.0
 
 
 def test_top_n_candidate_limit_enforcement_up_to_500():
     """Requested candidate counts exceeding safe thresholds must be clamped to HARD_MAX_CANDIDATES (500)."""
     manager = MolecularGenerationManager()
     target_info = {
+        "id": 1,
         "gene": "ALS",
         "target_family": "ALS",
-        "weed_sequence": "MVKLAARSTP",
+        "weed_species": "Amaranthus palmeri",
+        "weed_sequence": "MVKLAARSTPGRSVVTALKPALSDQ",
         "pockets_json": [{"center": [12.0, 15.0, 18.0]}]
     }
 
@@ -361,6 +441,51 @@ def test_top_n_candidate_limit_enforcement_up_to_500():
     )
     assert res["status"] == GenerationRunStatus.COMPLETED.value
     assert res["requested_count"] == 500  # Clamped to 500
+
+
+def test_structure_based_pocket_pharmacophore_analysis():
+    """PocketPharmacophoreAnalyzer extracts pocket volume, residue requirements, and computes ligand shape fit."""
+    from app.engines.molecular_generation.pocket_aware_design import PocketPharmacophoreAnalyzer
+    from rdkit import Chem
+
+    pocket_dict = {
+        "center": [10.0, 20.0, 30.0],
+        "score": 0.85,
+        "residues": ["ASP", "LYS", "PHE", "ARG", "SER", "VAL", "LEU", "TYR"]
+    }
+    features = PocketPharmacophoreAnalyzer.extract_pocket_features(pocket_dict)
+    assert features["pocket_volume_angstrom3"] > 300.0
+    assert features["residue_counts"]["acidic"] == 1  # ASP
+    assert features["residue_counts"]["basic"] == 2   # LYS, ARG
+    assert features["residue_counts"]["aromatic"] == 2  # PHE, TYR
+    assert features["pharmacophore_requirements"]["recommended_hba_min"] >= 2
+
+    # Evaluate a real drug-like molecule against this pocket
+    test_mol = Chem.MolFromSmiles("Cc1nc(nc(n1)Cl)NC(=O)NS(=O)(=O)c2ccccc2Cl")  # Chlorsulfuron
+    eval_res = PocketPharmacophoreAnalyzer.evaluate_molecule_pocket_fit(test_mol, features)
+    assert 0.0 <= eval_res["pocket_fit_score"] <= 1.0
+    assert eval_res["is_pocket_compatible"] is True
+    assert eval_res["shape_complementarity"] > 0.4
+    assert len(eval_res["satisfied_interactions"]) > 0
+
+
+def test_chembl_bioactivity_retrieval_and_provenance_labels():
+    """Database retrieval distinguishes live REST vs local benchmark with external_verification_status."""
+    gen = DatabaseRetrievalGenerator()
+    target_info = {
+        "gene": "ALS",
+        "target_family": "ALS",
+        "weed_species": "Amaranthus palmeri",
+        "weed_sequence": "MVKLAARSTPGRSVVTALKPALSDQ",
+        "pocket_center": [1.0, 2.0, 3.0]
+    }
+    res = gen.generate(target_info=target_info, parameters={"prefer_live_api": False}, max_candidates=5)
+    assert res["status"] == "COMPLETED"
+    assert len(res["molecules"]) > 0
+    # Benchmark fallback molecules must be clearly stamped
+    first_mol = res["molecules"][0]
+    assert first_mol["external_verification_status"] == "LOCAL_REFERENCE_ONLY"
+    assert first_mol["retrieval_method"] == "LOCAL_CURATED_BENCHMARK"
 
 
 # ===========================================================================
@@ -416,7 +541,7 @@ def test_molecular_generation_api_crud_and_execution_lifecycle(client, db_sessio
         name="Palmer Amaranth ALS",
         gene="ALS",
         target_family="ALS",
-        weed_sequence="MVKLAARSTP",
+        weed_sequence="MVKLAARSTPGRSVVTALKPALSDQ",
         is_primary_selected=True,
         pockets_json=[{"center": [12.0, 15.0, 18.0]}]
     )
