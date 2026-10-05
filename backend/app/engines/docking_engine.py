@@ -38,7 +38,6 @@ class RDKitShapeBindingEngine:
         if mol is None:
             return {
                 "status": "FAILED_INVALID_SMILES",
-                "affinity_kcal_mol": None,
                 "heuristic_affinity_kcal_mol": None,
                 "heuristic_pKd": None,
                 "surrogate_affinity_score": None
@@ -92,7 +91,6 @@ class RDKitShapeBindingEngine:
 
         return {
             "engine": "RDKit 3D Conformer Steric Complementarity (Surrogate)",
-            "affinity_kcal_mol": affinity_kcal,
             "heuristic_affinity_kcal_mol": affinity_kcal,
             "heuristic_pKd": heuristic_pkd,
             "surrogate_affinity_score": heuristic_pkd,

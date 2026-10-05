@@ -367,9 +367,15 @@ def test_boltz2_native_execution_and_json_parser(tmp_path):
         f.write("ATOM      1  CA  MET A   1      10.000  20.000  30.000  1.00 90.00           C\n")
 
     executed_cmds = []
+    captured_yaml = {}
 
     def mock_subprocess_run(cmd, *args, **kwargs):
         executed_cmds.append(cmd)
+        yaml_file = cmd[2]
+        assert os.path.exists(yaml_file), f"Boltz YAML input file must exist during subprocess run: {yaml_file}"
+        with open(yaml_file, "r") as yf:
+            captured_yaml["content"] = yf.read()
+
         out_dir = cmd[cmd.index("--out_dir") + 1]
         preds_dir = os.path.join(out_dir, "predictions", "test_complex")
         os.makedirs(preds_dir, exist_ok=True)
@@ -399,12 +405,10 @@ def test_boltz2_native_execution_and_json_parser(tmp_path):
         assert len(executed_cmds) == 1
         cmd = executed_cmds[0]
         assert cmd[1] == "predict"
-        yaml_path = cmd[2]
-        assert os.path.exists(yaml_path)
-        with open(yaml_path, "r") as yf:
-            content = yf.read()
-            assert "sequence: \"MVKLA\"" in content
-            assert "smiles: \"CC(=O)Oc1ccccc1C(=O)O\"" in content
+        assert "content" in captured_yaml
+        content = captured_yaml["content"]
+        assert "sequence: \"MVKLA\"" in content
+        assert "smiles: \"CC(=O)Oc1ccccc1C(=O)O\"" in content
 
         assert res["status"] == "COMPLETED"
         assert res["complex_confidence_pLDDT"] == 93.4
@@ -1589,7 +1593,8 @@ def test_validation_fixture_accession_is_not_an_implicit_project_target():
     assert ALPHAFOLD_API_TEST_ACCESSION == "P69905"
 
     # Verify that the test fixture accession is NEVER an entry in the herbicide target catalogue
-    for gene, info in TARGET_CATALOGUE.items():
+    for info in TARGET_CATALOGUE:
+        gene = info.get("gene")
         assert info.get("uniprot_id") != "P69905", f"Fixture accession found in catalogue for {gene}"
         assert info.get("uniprot_id") != "P10324", f"Legacy accession found as hardcoded ID in catalogue for {gene}"
 
@@ -1598,7 +1603,7 @@ def test_surrogate_values_are_clearly_labelled_heuristic():
     """
     Scientific Integrity: RDKitShapeBindingEngine surrogate results must explicitly declare
     execution_mode = 'SURROGATE_HEURISTIC' and use heuristic_affinity_kcal_mol / heuristic_pKd /
-    surrogate_affinity_score rather than native unadorned pKd.
+    surrogate_affinity_score rather than native unadorned pKd. Generic affinity_kcal_mol must be absent.
     """
     from app.engines.docking_engine import RDKitShapeBindingEngine
 
@@ -1608,7 +1613,45 @@ def test_surrogate_values_are_clearly_labelled_heuristic():
     assert "heuristic_affinity_kcal_mol" in res
     assert "heuristic_pKd" in res
     assert "surrogate_affinity_score" in res
+    assert "affinity_kcal_mol" not in res, "Ambiguous affinity_kcal_mol must not be present in surrogate output"
     assert res["heuristic_pKd"] is not None
+
+
+def test_crop_selectivity_biopython_pairwise_alignment_indel_handling():
+    """
+    Scientific Integrity: CropSelectivityEngine must perform true Biopython pairwise sequence alignment
+    (Needleman-Wunsch mode). An insertion or deletion in crop sequence must NOT displace or misalign
+    all downstream residues, unlike naive positional indexing.
+    """
+    from app.engines.selectivity_engine import CropSelectivityEngine
+    engine = CropSelectivityEngine()
+
+    # Weed: 10 residues, Crop: 11 residues with single inserted residue 'C' at position 6
+    weed_seq = "AAAAARRRRR"
+    crop_seq = "AAAAACRRRRR"
+
+    res = engine.align_sequences(weed_seq, crop_seq)
+    assert res["alignment_status"] == "COMPLETED"
+    assert res["alignment_method"] == "Biopython-Needleman-Wunsch-Global"
+    assert res["aligned_weed"] is not None
+    assert res["aligned_crop"] is not None
+
+    # Biopython global alignment inserts a gap '-' opposite 'C':
+    # Weed: AAAAA-RRRRR
+    # Crop: AAAAACRRRRR
+    # Matches = 10 (all 5 A's and all 5 R's match!)
+    # Only 1 divergence (the crop insertion at col 6)
+    assert res["divergent_residues_count"] == 1
+    divergence = res["divergent_residues"][0]
+    assert divergence["weed_aa"] == "-"
+    assert divergence["crop_aa"] == "C"
+    assert divergence["divergence_type"] == "crop_insertion"
+
+    # Evaluated selectivity preserves this sequence alignment result
+    eval_res = engine.evaluate_selectivity(weed_seq, crop_seq, weed_pIC50=8.0, crop_pIC50=6.0)
+    assert eval_res["sequence_alignment"]["alignment_method"] == "Biopython-Needleman-Wunsch-Global"
+    assert eval_res["sequence_alignment"]["divergent_residues_count"] == 1
+
 
 
 

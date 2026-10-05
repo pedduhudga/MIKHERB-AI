@@ -1,23 +1,74 @@
 from typing import Dict, Any, List
+from app.engines.target_discovery_engine import _align_pairwise_biopython
 
 class CropSelectivityEngine:
     """Evaluates crop selectivity by comparing weed and crop target structures via real dual docking results."""
 
     @staticmethod
     def align_sequences(weed_seq: str, crop_seq: str) -> Dict[str, Any]:
-        min_len = min(len(weed_seq), len(crop_seq))
-        matches = sum(1 for i in range(min_len) if weed_seq[i] == crop_seq[i])
-        seq_identity = round((matches / max(len(weed_seq), len(crop_seq))) * 100, 1) if max(len(weed_seq), len(crop_seq)) > 0 else 0.0
+        """
+        Performs true global sequence alignment between weed and crop targets using Biopython
+        Needleman-Wunsch dynamic programming. Identifies true insertions, deletions, and substitutions
+        without naive positional distortion.
+        """
+        aln = _align_pairwise_biopython(weed_seq, crop_seq)
+        if aln.get("alignment_status") != "COMPLETED":
+            return {
+                "alignment_method": aln.get("alignment_method") or "Biopython-Needleman-Wunsch-Global",
+                "alignment_status": aln.get("alignment_status", "FAILED"),
+                "sequence_identity_pct": aln.get("sequence_identity") if aln.get("sequence_identity") is not None else 0.0,
+                "divergent_residues_count": 0,
+                "divergent_residues": [],
+                "key_pocket_divergences": [],
+                "aligned_weed": None,
+                "aligned_crop": None,
+                "bit_score": None
+            }
 
-        divergent_residues = [
-            {"position": i + 1, "weed_aa": weed_seq[i], "crop_aa": crop_seq[i]}
-            for i in range(min_len) if weed_seq[i] != crop_seq[i]
-        ]
+        aligned_weed = aln.get("aligned_weed", "")
+        aligned_crop = aln.get("aligned_crop", "")
+        seq_identity = aln.get("sequence_identity", 0.0)
+
+        weed_pos = 0
+        crop_pos = 0
+        divergent_residues = []
+
+        for col_idx, (w_aa, c_aa) in enumerate(zip(aligned_weed, aligned_crop), start=1):
+            if w_aa != '-':
+                weed_pos += 1
+            if c_aa != '-':
+                crop_pos += 1
+
+            if w_aa != c_aa:
+                if w_aa != '-' and c_aa != '-':
+                    div_type = "substitution"
+                elif w_aa == '-':
+                    div_type = "crop_insertion"
+                else:
+                    div_type = "crop_deletion"
+
+                divergent_residues.append({
+                    "alignment_column": col_idx,
+                    "position": weed_pos if w_aa != '-' else crop_pos,
+                    "weed_position": weed_pos if w_aa != '-' else None,
+                    "crop_position": crop_pos if c_aa != '-' else None,
+                    "weed_aa": w_aa,
+                    "crop_aa": c_aa,
+                    "divergence_type": div_type
+                })
 
         return {
+            "alignment_method": "Biopython-Needleman-Wunsch-Global",
+            "alignment_status": "COMPLETED",
             "sequence_identity_pct": seq_identity,
+            "alignment_coverage_pct": aln.get("alignment_coverage"),
+            "alignment_length": aln.get("alignment_length"),
             "divergent_residues_count": len(divergent_residues),
-            "key_pocket_divergences": divergent_residues[:5]
+            "divergent_residues": divergent_residues,
+            "key_pocket_divergences": divergent_residues[:5],
+            "aligned_weed": aligned_weed,
+            "aligned_crop": aligned_crop,
+            "bit_score": aln.get("bit_score")
         }
 
     def evaluate_selectivity(
