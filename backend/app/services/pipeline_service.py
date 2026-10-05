@@ -616,9 +616,9 @@ class DiscoveryPipelineRunner:
                     gnina_actual_status = weed_dock["gnina"].get("status", "NOT_AVAILABLE")
                 else:
                     boltz_pKd, boltz_conf, gnina_cnn, gnina_aff = None, None, None, None
-                    pose_agree = "POCKET_NOT_AVAILABLE"
-                    boltz_actual_status = "POCKET_NOT_AVAILABLE"
-                    gnina_actual_status = "POCKET_NOT_AVAILABLE"
+                    pose_agree = "POCKET_CENTER_MISSING"
+                    boltz_actual_status = "POCKET_CENTER_MISSING"
+                    gnina_actual_status = "POCKET_CENTER_MISSING"
 
                 sel_score = selectivity_map.get(comp.compound_code)  # None if not available
                 safety_meta = safety_metadata_map.get(comp.compound_code, {})
@@ -671,8 +671,8 @@ class DiscoveryPipelineRunner:
                     boltz_report_status = dock_res["boltz"].get("status", "NOT_AVAILABLE")
                     gnina_report_status = dock_res["gnina"].get("status", "NOT_AVAILABLE")
                 else:
-                    boltz_report_status = "POCKET_NOT_AVAILABLE"
-                    gnina_report_status = "POCKET_NOT_AVAILABLE"
+                    boltz_report_status = "POCKET_CENTER_MISSING"
+                    gnina_report_status = "POCKET_CENTER_MISSING"
 
                 cand_data_for_report.append({
                     "code":         c.compound_code,

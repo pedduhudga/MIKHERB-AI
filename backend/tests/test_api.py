@@ -115,9 +115,11 @@ def test_firebase_auth_dependency_enforcement(monkeypatch):
     assert resp_ok.status_code == 200
 
 def test_firestore_synchronization_called_on_pipeline():
-    """Verify that sync_project_to_firestore is called when pipeline completes."""
-    from unittest.mock import patch
-    with patch("app.core.firebase.sync_project_to_firestore") as mock_sync:
+    """Verify that sync_project_to_firestore is called when pipeline creates or updates projects."""
+    from unittest.mock import patch, MagicMock
+    with patch("app.core.firebase._firebase_initialized", True), \
+         patch("app.core.firebase._firestore_client", MagicMock()), \
+         patch("app.core.firebase.sync_project_to_firestore") as mock_sync:
         mock_sync.return_value = True
         payload = {
             "name": "Firestore Sync Test Project",
