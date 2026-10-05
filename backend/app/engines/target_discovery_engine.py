@@ -257,17 +257,57 @@ TARGET_CATALOGUE = [
 # Target Gene Keywords for Cross-Validation
 # ---------------------------------------------------------------------------
 
-TARGET_GENE_KEYWORDS: Dict[str, List[str]] = {
-    "ALS":    ["als", "ahas", "acetolactate", "acetohydroxyacid", "ilvh", "ilvg", "ilvm"],
-    "HPPD":   ["hppd", "hydroxyphenylpyruvate", "4-hppd"],
-    "PPO":    ["ppo", "protox", "protoporphyrinogen"],
-    "EPSPS":  ["epsps", "arog", "shikimate", "enolpyruvyl"],
-    "ACCase": ["accase", "acc", "carboxylase", "biotin carboxylase", "acc1", "acc2"],
-    "psbA":   ["psba", "d1", "photosystem ii", "reaction center", "reaction centre"],
-    "PDS":    ["pds", "phytoene desaturase", "phytoene dehydrogenase"],
-    "KAS":    ["kas", "ketoacyl", "fatty acid", "fabh", "fabf", "vlcfa", "condensing enzyme"],
-    "GS":     ["gs", "gln", "glutamine synthetase", "glna", "glutamate--ammonia"],
-    "DXS":    ["dxs", "xylulose", "1-deoxy-d-xylulose", "mep", "clostridial"]
+# ---------------------------------------------------------------------------
+# Controlled Gene Aliases & Function Keywords for Verification (v9)
+# ---------------------------------------------------------------------------
+
+# Normalized exact gene aliases (UniProt geneName, synonyms, orderedLocusNames)
+TARGET_GENE_ALIASES: Dict[str, List[str]] = {
+    "ALS":    ["als", "ahas", "ahas1", "ahas2", "csr1", "tzp5", "ilvh", "ilvg", "ilvm"],
+    "HPPD":   ["hppd", "hpd", "pds1", "4-hppd"],
+    "PPO":    ["ppo", "ppx", "ppx2l", "ppx2", "ppx1", "ppox", "ppox1", "ppox2", "hemg", "hemg1", "ppop1"],
+    "EPSPS":  ["epsps", "aroa", "arog", "epsp-s", "epsps-r", "epsps-r1", "epsps-r2", "epsps-s"],
+    "ACCase": ["accase", "acc", "acc1", "acc2", "accd", "emb22", "gk", "pas3"],
+    "psbA":   ["psba", "d1"],
+    "PDS":    ["pds", "pds1", "pds2"],
+    "KAS":    ["kas", "kas1", "kas2", "kas3", "kasi", "kasii", "kasiii", "fabh", "fabf", "mtkas"],
+    "GS":     ["gs", "gln", "gln1", "gln2", "glna", "gln1-1", "gln1-2", "gln1-3", "gln1-4", "gln1-5", "gln2-1"],
+    "DXS":    ["dxs", "cla1", "def"]
+}
+
+# Controlled target-specific biological function keywords (recommendedName, alternativeName, submissionNames, functional description)
+TARGET_FUNCTION_KEYWORDS: Dict[str, List[str]] = {
+    "ALS":    ["acetolactate synthase", "acetohydroxyacid synthase", "acetohydroxy-acid synthase", "chlorsulfuron resistant"],
+    "HPPD":   ["hydroxyphenylpyruvate dioxygenase", "hydroxyphenylpyruvic acid oxidase", "4-hydroxyphenylpyruvate dioxygenase"],
+    "PPO":    ["protoporphyrinogen oxidase", "protoporphyrinogen ix oxidase", "protox"],
+    "EPSPS":  ["3-phosphoshikimate 1-carboxyvinyltransferase", "5-enolpyruvylshikimate-3-phosphate synthase", "epsp synthase", "shikimate-3-phosphate"],
+    "ACCase": ["acetyl-coa carboxylase", "acetyl-coenzyme a carboxylase", "biotin carboxylase"],
+    "psbA":   ["photosystem ii protein d1", "photosystem ii d1", "photosystem ii q(b) protein", "d1 reaction centre protein", "32 kda thylakoid membrane protein"],
+    "PDS":    ["phytoene desaturase", "phytoene dehydrogenase", "15-cis-phytoene desaturase"],
+    "KAS":    ["3-oxoacyl-[acyl-carrier-protein] synthase", "beta-ketoacyl-acp synthase", "ketoacyl-acp synthase", "3-ketoacyl-acyl carrier protein synthase"],
+    "GS":     ["glutamine synthetase", "glutamate--ammonia ligase"],
+    "DXS":    ["1-deoxy-d-xylulose-5-phosphate synthase", "deoxyxylulose-5-phosphate synthase", "cloroplastos alterados"]
+}
+
+# Backwards compatibility alias
+TARGET_GENE_KEYWORDS: Dict[str, List[str]] = TARGET_GENE_ALIASES
+
+# Curated Taxonomy ID mapping for plant organisms
+SPECIES_TAXONOMY_MAP: Dict[str, int] = {
+    "amaranthus palmeri": 107608,
+    "amaranthus tuberculatus": 107609,
+    "erigeron canadensis": 72917,
+    "eleusine indica": 29674,
+    "lolium rigidum": 89674,
+    "alopecurus myosuroides": 81473,
+    "arabidopsis thaliana": 3702,
+    "glycine max": 3847,
+    "zea mays": 4577,
+    "oryza sativa": 4530,
+    "oryza sativa subsp. japonica": 39947,
+    "oryza sativa subsp. indica": 39946,
+    "triticum aestivum": 4565,
+    "nicotiana tabacum": 4097,
 }
 
 # ---------------------------------------------------------------------------
@@ -312,10 +352,33 @@ ESSENTIALITY_EVIDENCE_REGISTRY: Dict[Tuple[str, str], Dict[str, Any]] = {
 # UniProt verification, search, and structure helpers
 # ---------------------------------------------------------------------------
 
+def _normalize_name(s: Optional[str]) -> str:
+    """Normalize scientific species name or identifier for exact string comparison."""
+    if not s:
+        return ""
+    import re
+    return re.sub(r"[^a-z0-9 ]+", " ", s.lower()).strip()
+
+
 def _verify_uniprot_accession(accession: str, expected_gene: str, expected_species: str, timeout: int = 8) -> Dict[str, Any]:
     """
     Verifies that a UniProt accession exists, is active, matches the expected species,
     matches the expected gene, and represents the correct biological target function.
+
+    Evidence Integrity v9 principles:
+      1. Exact organism verification:
+         - Validates UniProt taxonomy ID when available in SPECIES_TAXONOMY_MAP.
+         - Exact normalized scientific name match.
+         - 'Amaranthus palmeri' will NEVER match 'Amaranthus tuberculatus'.
+      2. Strict separation of gene vs function verification:
+         - gene_verified ONLY checks gene fields (geneName, synonyms, orderedLocusNames).
+           Protein description cannot make gene_verified True.
+         - function_verified ONLY checks protein recommendedName, alternativeNames, submissionNames.
+           Gene presence cannot make function_verified True.
+      3. Provenance status requires:
+         organism_verified == True AND gene_verified == True AND function_verified == True.
+         Otherwise status = INVALID.
+      4. Missing or empty gene/function fields cause INVALID status.
 
     Returns:
         organism_verified: bool
@@ -325,6 +388,7 @@ def _verify_uniprot_accession(accession: str, expected_gene: str, expected_speci
         status: backwards-compatible alias for provenance_status
         reviewed: bool (True for Swiss-Prot, False for TrEMBL)
         organism_scientific: str or None
+        taxon_id: int or None
         reason: str or None
     """
     if not accession:
@@ -336,6 +400,7 @@ def _verify_uniprot_accession(accession: str, expected_gene: str, expected_speci
             "function_verified": False,
             "reviewed": False,
             "organism_scientific": None,
+            "taxon_id": None,
             "reason": "EMPTY_ACCESSION"
         }
 
@@ -351,6 +416,7 @@ def _verify_uniprot_accession(accession: str, expected_gene: str, expected_speci
                 "function_verified": False,
                 "reviewed": False,
                 "organism_scientific": None,
+                "taxon_id": None,
                 "reason": "ACCESSION_NOT_FOUND"
             }
         if resp.status_code != 200:
@@ -362,6 +428,7 @@ def _verify_uniprot_accession(accession: str, expected_gene: str, expected_speci
                 "function_verified": False,
                 "reviewed": False,
                 "organism_scientific": None,
+                "taxon_id": None,
                 "reason": f"HTTP_{resp.status_code}"
             }
 
@@ -375,54 +442,119 @@ def _verify_uniprot_accession(accession: str, expected_gene: str, expected_speci
                 "function_verified": False,
                 "reviewed": False,
                 "organism_scientific": None,
+                "taxon_id": None,
                 "reason": "ENTRY_INACTIVE"
             }
 
         entry_type_str = data.get("entryType", "")
         is_reviewed = ("Swiss-Prot" in entry_type_str) or ("reviewed" in entry_type_str.lower() and "unreviewed" not in entry_type_str.lower())
 
-        # 1. Scientific Organism Verification
-        org_sci = data.get("organism", {}).get("scientificName", "").lower()
-        org_common = data.get("organism", {}).get("commonName", "").lower()
-        expected_tokens = [tok.strip().lower() for tok in expected_species.split() if len(tok) > 2]
-        organism_verified = any(tok in org_sci or tok in org_common for tok in expected_tokens) if expected_tokens else True
+        # -------------------------------------------------------------------
+        # 1. Exact Scientific Organism & Taxonomy Verification
+        # -------------------------------------------------------------------
+        org_data = data.get("organism") or {}
+        raw_sci = org_data.get("scientificName", "")
+        norm_sci = _normalize_name(raw_sci)
+        norm_expected_species = _normalize_name(expected_species)
+        uniprot_taxon_id = org_data.get("taxonId")
 
-        # 2. Gene Name Verification
-        gene_names: List[str] = []
-        for g in data.get("genes", []):
+        expected_taxon_id = SPECIES_TAXONOMY_MAP.get(norm_expected_species)
+
+        # Exact match logic
+        organism_verified = False
+        if expected_taxon_id is not None and uniprot_taxon_id is not None:
+            if uniprot_taxon_id == expected_taxon_id:
+                organism_verified = True
+            elif norm_expected_species in ("oryza sativa",) and uniprot_taxon_id in (39947, 39946, 4530):
+                organism_verified = True
+
+        if not organism_verified and norm_sci and norm_expected_species:
+            # Check exact normalized scientific name or exact subspecies match
+            if norm_sci == norm_expected_species:
+                organism_verified = True
+            elif norm_sci.startswith(norm_expected_species + " "):
+                # e.g., 'oryza sativa subsp japonica' matching expected 'oryza sativa'
+                organism_verified = True
+
+        # -------------------------------------------------------------------
+        # 2. Strict Gene Name Verification (Independent from Protein Description)
+        # -------------------------------------------------------------------
+        gene_entries = data.get("genes") or []
+        gene_tokens: List[str] = []
+        for g in gene_entries:
             if g.get("geneName", {}).get("value"):
-                gene_names.append(g["geneName"]["value"].lower())
+                gene_tokens.append(_normalize_name(g["geneName"]["value"]))
             for syn in g.get("synonyms", []):
                 if syn.get("value"):
-                    gene_names.append(syn["value"].lower())
+                    gene_tokens.append(_normalize_name(syn["value"]))
             for ol in g.get("orderedLocusNames", []):
                 if ol.get("value"):
-                    gene_names.append(ol["value"].lower())
+                    gene_tokens.append(_normalize_name(ol["value"]))
 
-        # 3. Protein Function / Description Verification
-        full_names: List[str] = []
-        rec = data.get("proteinDescription", {}).get("recommendedName", {}).get("fullName", {}).get("value")
+        expected_gene_norm = _normalize_name(expected_gene)
+        allowed_gene_aliases = set(
+            _normalize_name(a) for a in TARGET_GENE_ALIASES.get(expected_gene, [expected_gene])
+        )
+
+        gene_verified = False
+        if gene_tokens:
+            # Check if any gene token matches the normalized expected aliases
+            for gt in gene_tokens:
+                # 1. Exact match against allowed aliases
+                if gt in allowed_gene_aliases or gt == expected_gene_norm:
+                    gene_verified = True
+                    break
+                # 2. Prefix/variant match (e.g. 'epsps r2' matching 'epsps', 'acc1' matching 'acc')
+                for alias in allowed_gene_aliases:
+                    if gt.startswith(alias) or gt.endswith(alias) or alias in gt.split():
+                        gene_verified = True
+                        break
+                if gene_verified:
+                    break
+
+        # -------------------------------------------------------------------
+        # 3. Strict Protein Function Verification (Independent from Gene Fields)
+        # -------------------------------------------------------------------
+        pdesc = data.get("proteinDescription") or {}
+        function_strings: List[str] = []
+        rec = pdesc.get("recommendedName", {}).get("fullName", {}).get("value")
         if rec:
-            full_names.append(rec.lower())
-        for sub in data.get("proteinDescription", {}).get("submissionNames", []):
+            function_strings.append(_normalize_name(rec))
+        for sub in pdesc.get("submissionNames", []):
             if sub.get("fullName", {}).get("value"):
-                full_names.append(sub["fullName"]["value"].lower())
-        for alt in data.get("proteinDescription", {}).get("alternativeNames", []):
+                function_strings.append(_normalize_name(sub["fullName"]["value"]))
+        for alt in pdesc.get("alternativeNames", []):
             if alt.get("fullName", {}).get("value"):
-                full_names.append(alt["fullName"]["value"].lower())
+                function_strings.append(_normalize_name(alt["fullName"]["value"]))
 
-        kw_list = TARGET_GENE_KEYWORDS.get(expected_gene, [expected_gene.lower()])
-        gene_verified = any(any(kw in gn for kw in kw_list) for gn in gene_names) or any(any(kw in fn for kw in kw_list) for fn in full_names)
-        function_verified = any(any(kw in fn for kw in kw_list) for fn in full_names) or gene_verified
+        func_kws = [
+            _normalize_name(kw) for kw in TARGET_FUNCTION_KEYWORDS.get(expected_gene, [expected_gene])
+        ]
 
+        function_verified = False
+        if function_strings:
+            for fs in function_strings:
+                if any(kw in fs for kw in func_kws):
+                    function_verified = True
+                    break
+
+        # -------------------------------------------------------------------
+        # 4. Provenance Status Determination: ALL THREE MUST BE TRUE
+        # -------------------------------------------------------------------
         if not organism_verified:
-            reason = f"ORGANISM_MISMATCH: expected '{expected_species}', found '{org_sci}'"
+            reason = f"ORGANISM_MISMATCH: expected '{expected_species}' (taxon: {expected_taxon_id}), found '{raw_sci}' (taxon: {uniprot_taxon_id})"
+            status = "INVALID"
+        elif not gene_tokens:
+            reason = f"EMPTY_GENE_FIELDS: no gene symbols or locus names found for expected gene '{expected_gene}'"
             status = "INVALID"
         elif not gene_verified:
-            reason = f"GENE_MISMATCH: expected '{expected_gene}', found genes {gene_names}"
+            reason = f"GENE_MISMATCH: expected gene '{expected_gene}', found gene fields {gene_tokens}"
+            status = "INVALID"
+        elif not function_strings:
+            reason = f"EMPTY_FUNCTION_FIELDS: no protein description found for target '{expected_gene}'"
             status = "INVALID"
         elif not function_verified:
-            reason = f"FUNCTION_MISMATCH: expected target {expected_gene}, found '{full_names}'"
+            reason = f"FUNCTION_MISMATCH: expected target function '{expected_gene}', found descriptions {function_strings}"
             status = "INVALID"
         else:
             reason = None
@@ -435,7 +567,8 @@ def _verify_uniprot_accession(accession: str, expected_gene: str, expected_speci
             "gene_verified": gene_verified,
             "function_verified": function_verified,
             "reviewed": is_reviewed,
-            "organism_scientific": data.get("organism", {}).get("scientificName"),
+            "organism_scientific": raw_sci,
+            "taxon_id": uniprot_taxon_id,
             "reason": reason
         }
     except Exception as e:
@@ -447,6 +580,7 @@ def _verify_uniprot_accession(accession: str, expected_gene: str, expected_speci
             "function_verified": False,
             "reviewed": False,
             "organism_scientific": None,
+            "taxon_id": None,
             "reason": str(e)
         }
 
@@ -536,13 +670,13 @@ class MultiTargetDiscoveryEngine:
         ("ALS", "erigeron canadensis"): {"accession": "G8E459", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": False, "species": "Erigeron canadensis", "gene": "ALS"},
         ("ALS", "arabidopsis thaliana"): {"accession": "P17597", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": True, "species": "Arabidopsis thaliana", "gene": "ALS"},
         ("HPPD", "arabidopsis thaliana"): {"accession": "P93836", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": True, "species": "Arabidopsis thaliana", "gene": "HPPD"},
-        ("PPO", "amaranthus palmeri"): {"accession": "A0A4V0YX81", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": False, "species": "Amaranthus palmeri", "gene": "PPO"},
+        ("PPO", "amaranthus palmeri"): {"accession": "A0A6C0RR75", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": False, "species": "Amaranthus palmeri", "gene": "PPO"},
         ("PPO", "arabidopsis thaliana"): {"accession": "P55826", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": True, "species": "Arabidopsis thaliana", "gene": "PPO"},
         ("EPSPS", "amaranthus palmeri"): {"accession": "M1K439", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": False, "species": "Amaranthus palmeri", "gene": "EPSPS"},
         ("EPSPS", "eleusine indica"): {"accession": "A0A0A1C3J0", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": False, "species": "Eleusine indica", "gene": "EPSPS"},
         ("EPSPS", "lolium rigidum"): {"accession": "A0A5B9T5W8", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": False, "species": "Lolium rigidum", "gene": "EPSPS"},
-        ("EPSPS", "arabidopsis thaliana"): {"accession": "Q9SQT8", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": True, "species": "Arabidopsis thaliana", "gene": "EPSPS"},
-        ("ACCase", "alopecurus myosuroides"): {"accession": "Q8LRK2", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": False, "species": "Alopecurus myosuroides", "gene": "ACCase"},
+        ("EPSPS", "arabidopsis thaliana"): {"accession": "Q9FVP6", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": False, "species": "Arabidopsis thaliana", "gene": "EPSPS"},
+        ("ACCase", "alopecurus myosuroides"): {"accession": "Q5CCG4", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": False, "species": "Alopecurus myosuroides", "gene": "ACCase"},
         ("ACCase", "lolium rigidum"): {"accession": "A0A5B9T5R1", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": False, "species": "Lolium rigidum", "gene": "ACCase"},
         ("ACCase", "arabidopsis thaliana"): {"accession": "Q38970", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": True, "species": "Arabidopsis thaliana", "gene": "ACCase"},
         ("psbA", "amaranthus palmeri"): {"accession": "A0A890DLU5", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": False, "species": "Amaranthus palmeri", "gene": "psbA"},
@@ -556,13 +690,13 @@ class MultiTargetDiscoveryEngine:
         ("ALS", "zea mays"): {"accession": "Q41768", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": True, "species": "Zea mays", "gene": "ALS"},
         ("ALS", "oryza sativa"): {"accession": "Q6K2E8", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": True, "species": "Oryza sativa", "gene": "ALS"},
         ("ALS", "triticum aestivum"): {"accession": "A0A3B6PRC5", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": False, "species": "Triticum aestivum", "gene": "ALS"},
-        ("HPPD", "glycine max"): {"accession": "A5Z1N7", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": False, "species": "Glycine max", "gene": "HPPD"},
-        ("HPPD", "zea mays"): {"accession": "C0PMF6", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": False, "species": "Zea mays", "gene": "HPPD"},
+        ("HPPD", "glycine max"): {"accession": "I1M6Z5", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": False, "species": "Glycine max", "gene": "HPPD"},
+        ("HPPD", "zea mays"): {"accession": "I7HIS1", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": False, "species": "Zea mays", "gene": "HPPD"},
         ("HPPD", "oryza sativa"): {"accession": "Q0E3L4", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": False, "species": "Oryza sativa", "gene": "HPPD"},
         ("PPO", "glycine max"): {"accession": "P35055", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": True, "species": "Glycine max", "gene": "PPO"},
         ("PPO", "zea mays"): {"accession": "Q9ZTP4", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": True, "species": "Zea mays", "gene": "PPO"},
-        ("EPSPS", "glycine max"): {"accession": "C6THS3", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": False, "species": "Glycine max", "gene": "EPSPS"},
-        ("EPSPS", "zea mays"): {"accession": "B6UDH4", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": False, "species": "Zea mays", "gene": "EPSPS"},
+        ("EPSPS", "glycine max"): {"accession": "I1J7U9", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": False, "species": "Glycine max", "gene": "EPSPS"},
+        ("EPSPS", "zea mays"): {"accession": "O24566", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": False, "species": "Zea mays", "gene": "EPSPS"},
         ("EPSPS", "oryza sativa"): {"accession": "Q5NTH3", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": True, "species": "Oryza sativa", "gene": "EPSPS"},
         ("ACCase", "glycine max"): {"accession": "P49158", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": True, "species": "Glycine max", "gene": "ACCase"},
         ("ACCase", "zea mays"): {"accession": "A0A804ULV9", "source": "UniProt", "source_type": "CURATED_MAPPING", "retrieved_at": "2026-10-05", "reviewed": False, "species": "Zea mays", "gene": "ACCase"},

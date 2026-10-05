@@ -457,7 +457,7 @@ def test_target_discovery_uniprot_accession_verification_invalid():
     mock_resp.status_code = 200
     mock_resp.json.return_value = {
         "entryType": "UniProtKB reviewed (Swiss-Prot)",
-        "organism": {"scientificName": "Arabidopsis thaliana"},
+        "organism": {"scientificName": "Arabidopsis thaliana", "taxonId": 3702},
         "genes": [{"geneName": {"value": "ALS"}}],
         "proteinDescription": {"recommendedName": {"fullName": {"value": "Acetolactate synthase"}}}
     }
@@ -470,38 +470,120 @@ def test_target_discovery_uniprot_accession_verification_invalid():
 
 
 def test_target_discovery_uniprot_accession_verification_gene_mismatch():
-    """Accession verification must flag gene mismatches as INVALID even when organism matches."""
+    """Accession verification must flag gene mismatches as INVALID even when organism and function match."""
     from app.engines.target_discovery_engine import _verify_uniprot_accession
     mock_resp = MagicMock()
     mock_resp.status_code = 200
+    # Correct organism + wrong gene + correct function
     mock_resp.json.return_value = {
         "entryType": "UniProtKB reviewed (Swiss-Prot)",
-        "organism": {"scientificName": "Arabidopsis thaliana"},
+        "organism": {"scientificName": "Arabidopsis thaliana", "taxonId": 3702},
         "genes": [{"geneName": {"value": "HPPD"}}],
-        "proteinDescription": {"recommendedName": {"fullName": {"value": "4-hydroxyphenylpyruvate dioxygenase"}}}
+        "proteinDescription": {"recommendedName": {"fullName": {"value": "Acetolactate synthase"}}}
     }
     with patch("requests.get", return_value=mock_resp):
         v_res = _verify_uniprot_accession("P93836", "ALS", "Arabidopsis thaliana")
         assert v_res["status"] == "INVALID"
+        assert v_res["organism_verified"] is True
         assert v_res["gene_verified"] is False
+        assert v_res["function_verified"] is True
         assert "GENE_MISMATCH" in v_res["reason"]
 
 
 def test_target_discovery_uniprot_accession_verification_function_mismatch():
-    """Accession verification must flag functional description mismatches as INVALID."""
+    """Accession verification must flag functional description mismatches as INVALID even when organism and gene match."""
     from app.engines.target_discovery_engine import _verify_uniprot_accession
     mock_resp = MagicMock()
     mock_resp.status_code = 200
+    # Correct organism + correct gene + wrong function
     mock_resp.json.return_value = {
         "entryType": "UniProtKB reviewed (Swiss-Prot)",
-        "organism": {"scientificName": "Arabidopsis thaliana"},
-        "genes": [],
+        "organism": {"scientificName": "Arabidopsis thaliana", "taxonId": 3702},
+        "genes": [{"geneName": {"value": "ALS"}}],
         "proteinDescription": {"recommendedName": {"fullName": {"value": "Histone H3"}}}
     }
     with patch("requests.get", return_value=mock_resp):
         v_res = _verify_uniprot_accession("P17597", "ALS", "Arabidopsis thaliana")
         assert v_res["status"] == "INVALID"
+        assert v_res["organism_verified"] is True
+        assert v_res["gene_verified"] is True
         assert v_res["function_verified"] is False
+        assert "FUNCTION_MISMATCH" in v_res["reason"]
+
+
+def test_target_discovery_uniprot_species_exact_isolation_palmeri_vs_tuberculatus():
+    """Amaranthus palmeri must NOT match Amaranthus tuberculatus even though genus tokens overlap."""
+    from app.engines.target_discovery_engine import _verify_uniprot_accession
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "entryType": "UniProtKB unreviewed",
+        "organism": {"scientificName": "Amaranthus tuberculatus", "taxonId": 107609},
+        "genes": [{"geneName": {"value": "ALS"}}],
+        "proteinDescription": {"recommendedName": {"fullName": {"value": "Acetolactate synthase"}}}
+    }
+    with patch("requests.get", return_value=mock_resp):
+        v_res = _verify_uniprot_accession("A0A890DLI3", "ALS", "Amaranthus palmeri")
+        assert v_res["status"] == "INVALID"
+        assert v_res["organism_verified"] is False
+        assert "ORGANISM_MISMATCH" in v_res["reason"]
+
+
+def test_target_discovery_uniprot_verification_empty_gene_fields():
+    """Empty or missing gene fields must result in INVALID status and empty_gene_fields reason."""
+    from app.engines.target_discovery_engine import _verify_uniprot_accession
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "entryType": "UniProtKB reviewed (Swiss-Prot)",
+        "organism": {"scientificName": "Arabidopsis thaliana", "taxonId": 3702},
+        "genes": [],
+        "proteinDescription": {"recommendedName": {"fullName": {"value": "Acetolactate synthase"}}}
+    }
+    with patch("requests.get", return_value=mock_resp):
+        v_res = _verify_uniprot_accession("P17597", "ALS", "Arabidopsis thaliana")
+        assert v_res["status"] == "INVALID"
+        assert v_res["gene_verified"] is False
+        assert "EMPTY_GENE_FIELDS" in v_res["reason"]
+
+
+def test_target_discovery_uniprot_verification_empty_function_fields():
+    """Empty or missing protein description must result in INVALID status and empty_function_fields reason."""
+    from app.engines.target_discovery_engine import _verify_uniprot_accession
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "entryType": "UniProtKB reviewed (Swiss-Prot)",
+        "organism": {"scientificName": "Arabidopsis thaliana", "taxonId": 3702},
+        "genes": [{"geneName": {"value": "ALS"}}],
+        "proteinDescription": {}
+    }
+    with patch("requests.get", return_value=mock_resp):
+        v_res = _verify_uniprot_accession("P17597", "ALS", "Arabidopsis thaliana")
+        assert v_res["status"] == "INVALID"
+        assert v_res["function_verified"] is False
+        assert "EMPTY_FUNCTION_FIELDS" in v_res["reason"]
+
+
+def test_target_discovery_uniprot_verification_all_correct_verified():
+    """When organism, gene, and function all match strictly, provenance_status must be VERIFIED."""
+    from app.engines.target_discovery_engine import _verify_uniprot_accession
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "entryType": "UniProtKB reviewed (Swiss-Prot)",
+        "organism": {"scientificName": "Arabidopsis thaliana", "taxonId": 3702},
+        "genes": [{"geneName": {"value": "ALS"}, "synonyms": [{"value": "AHAS"}]}],
+        "proteinDescription": {"recommendedName": {"fullName": {"value": "Acetolactate synthase, chloroplastic"}}}
+    }
+    with patch("requests.get", return_value=mock_resp):
+        v_res = _verify_uniprot_accession("P17597", "ALS", "Arabidopsis thaliana")
+        assert v_res["status"] == "VERIFIED"
+        assert v_res["provenance_status"] == "VERIFIED"
+        assert v_res["organism_verified"] is True
+        assert v_res["gene_verified"] is True
+        assert v_res["function_verified"] is True
+        assert v_res["reason"] is None
 
 
 def test_target_discovery_missing_plddt_never_manufactures_score():
