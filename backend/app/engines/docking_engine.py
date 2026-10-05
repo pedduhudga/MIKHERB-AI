@@ -284,7 +284,7 @@ class Boltz2Adapter:
             return {
                 "engine": "Boltz-2 AI",
                 "status": "POCKET_CENTER_MISSING",
-                "pKd_predicted": None,
+                "pIC50_predicted": None,
                 "complex_confidence_pLDDT": None,
                 "error": "Valid 3D pocket center coordinates required for Boltz-2 complex prediction."
             }
@@ -294,7 +294,7 @@ class Boltz2Adapter:
             fallback_res = RDKitShapeBindingEngine.calculate_binding_score(protein_pdb_path, smiles, pocket_center)
             return {
                 "engine": "Boltz-2 AI (Not Installed)",
-                "pKd_predicted": None,
+                "pIC50_predicted": None,
                 "surrogate_heuristic_score": fallback_res,
                 "estimated_affinity_nM": None,
                 "complex_confidence_pLDDT": None,
@@ -308,7 +308,6 @@ class Boltz2Adapter:
                 "engine": "Boltz-2 AI",
                 "status": "FAILED_INPUT",
                 "pIC50_predicted": None,
-                "pKd_predicted": None,
                 "affinity_raw_log_ic50_uM": None,
                 "affinity_probability_binary": None,
                 "boltz_confidence_score": None,
@@ -393,7 +392,6 @@ class Boltz2Adapter:
                             "engine": "Boltz-2 AI Native Executable",
                             "pIC50_predicted": round(float(pic50), 2),
                             "boltz_pIC50_predicted": round(float(pic50), 2),
-                            "pKd_predicted": round(float(pic50), 2),
                             "predicted_ic50_equivalent_nM": estimated_ic50_nm,
                             "estimated_affinity_nM": estimated_ic50_nm,
                             "affinity_metric": "log10_uM_IC50",
@@ -411,7 +409,6 @@ class Boltz2Adapter:
                         "engine": "Boltz-2 AI Native Executable",
                         "status": "FAILED_OUTPUT_PARSE",
                         "pIC50_predicted": None,
-                        "pKd_predicted": None,
                         "boltz_complex_plddt": None,
                         "complex_confidence_pLDDT": None,
                         "error": "Boltz-2 executed but required confidence_*.json or affinity_*.json fields were missing or invalid."
@@ -421,7 +418,6 @@ class Boltz2Adapter:
                         "engine": "Boltz-2 AI Native Executable",
                         "status": "FAILED_EXECUTION",
                         "pIC50_predicted": None,
-                        "pKd_predicted": None,
                         "boltz_complex_plddt": None,
                         "complex_confidence_pLDDT": None,
                         "error": res.stderr.strip() if res.stderr else f"Exit code {res.returncode}"
@@ -431,7 +427,6 @@ class Boltz2Adapter:
                     "engine": "Boltz-2 AI Native Executable",
                     "status": "FAILED_EXECUTION",
                     "pIC50_predicted": None,
-                    "pKd_predicted": None,
                     "boltz_complex_plddt": None,
                     "complex_confidence_pLDDT": None,
                     "error": str(e)
@@ -441,7 +436,6 @@ class Boltz2Adapter:
             "engine": "Boltz-2 AI Native Executable",
             "status": "FAILED_UNKNOWN",
             "pIC50_predicted": None,
-            "pKd_predicted": None,
             "boltz_complex_plddt": None,
             "complex_confidence_pLDDT": None
         }
@@ -463,7 +457,7 @@ class AIDockingEngine:
             return {
                 "status": "POCKET_CENTER_MISSING",
                 "error": "Valid 3D pocket center coordinates required for docking screening.",
-                "boltz": {"status": "POCKET_CENTER_MISSING", "pKd_predicted": None},
+                "boltz": {"status": "POCKET_CENTER_MISSING", "pIC50_predicted": None},
                 "gnina": {"status": "POCKET_CENTER_MISSING", "affinity_kcal_mol": None},
                 "pose_agreement": "NOT_AVAILABLE"
             }
@@ -471,13 +465,13 @@ class AIDockingEngine:
         boltz_res = self.boltz.predict_complex(protein_pdb_path, smiles, pocket_center, protein_sequence=protein_sequence)
         gnina_res = self.gnina.dock(protein_pdb_path, smiles, pocket_center, box_size=box_size)
 
-        boltz_pKd = boltz_res.get("pKd_predicted") if boltz_res.get("status") == "COMPLETED" else None
+        boltz_pic50 = boltz_res.get("pIC50_predicted") if boltz_res.get("status") == "COMPLETED" else None
         gnina_aff = gnina_res.get("affinity_kcal_mol") if gnina_res.get("status") == "COMPLETED" else None
 
-        if boltz_pKd is not None and gnina_aff is not None:
+        if boltz_pic50 is not None and gnina_aff is not None:
             pose_agreement = "MULTI_MODEL_COMPLETED"
         else:
-            pose_agreement = "SINGLE_MODEL_ONLY" if (boltz_pKd is not None or gnina_aff is not None) else "NOT_AVAILABLE"
+            pose_agreement = "SINGLE_MODEL_ONLY" if (boltz_pic50 is not None or gnina_aff is not None) else "NOT_AVAILABLE"
 
         return {
             "boltz": boltz_res,

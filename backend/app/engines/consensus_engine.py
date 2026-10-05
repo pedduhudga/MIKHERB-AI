@@ -22,6 +22,7 @@ class MikHerbConsensusScoreEngine:
         self,
         target_relevance: Optional[float] = None,
         pocket_confidence: Optional[float] = None,
+        boltz_pIC50: Optional[float] = None,
         boltz_pKd: Optional[float] = None,
         gnina_cnn_score: Optional[float] = None,
         pose_agreement: Optional[str] = None,
@@ -40,8 +41,9 @@ class MikHerbConsensusScoreEngine:
         if pocket_confidence is not None:
             components["pocket_confidence"] = float(pocket_confidence)
 
-        if boltz_pKd is not None:
-            components["boltz_prediction"] = min(100.0, max(0.0, (float(boltz_pKd) - 5.0) * 20.0))
+        effective_boltz_affinity = boltz_pIC50 if boltz_pIC50 is not None else boltz_pKd
+        if effective_boltz_affinity is not None:
+            components["boltz_prediction"] = min(100.0, max(0.0, (float(effective_boltz_affinity) - 5.0) * 20.0))
 
         if gnina_cnn_score is not None:
             components["gnina_docking"] = min(100.0, max(0.0, float(gnina_cnn_score) * 100.0))

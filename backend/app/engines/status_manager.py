@@ -31,13 +31,23 @@ def _validate_gnina() -> bool:
         return False
 
 def _validate_boltz() -> bool:
-    import shutil, subprocess
+    import shutil, tempfile, os
     boltz_bin = shutil.which("boltz")
     if not boltz_bin:
         return False
     try:
-        res = subprocess.run([boltz_bin, "--help"], capture_output=True, text=True, timeout=10)
-        return res.returncode == 0
+        from app.engines.docking_engine import Boltz2Adapter
+        adapter = Boltz2Adapter()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dummy_pdb = os.path.join(tmpdir, "fixture.pdb")
+            with open(dummy_pdb, "w") as f:
+                f.write("ATOM      1  CA  MET A   1      10.000  10.000  10.000  1.00 88.00           C\n")
+            res = adapter.predict_complex(dummy_pdb, "CCO", [10.0, 10.0, 10.0], protein_sequence="MKVLA")
+            return (
+                res.get("status") == "COMPLETED"
+                and res.get("pIC50_predicted") is not None
+                and res.get("boltz_complex_plddt") is not None
+            )
     except Exception:
         return False
 
@@ -47,16 +57,21 @@ def _validate_p2rank() -> bool:
     if not p2rank_bin:
         return False
     try:
-        from app.engines.protein_engine import P2RankAdapter
-        adapter = P2RankAdapter()
+        from app.engines.protein_engine import P2RankPocketPredictor
+        predictor = P2RankPocketPredictor()
         with tempfile.TemporaryDirectory() as tmpdir:
             dummy_pdb = os.path.join(tmpdir, "fixture.pdb")
             with open(dummy_pdb, "w") as f:
                 f.write("ATOM      1  CA  MET A   1      10.000  10.000  10.000  1.00 88.00           C\n")
-            res = adapter.predict_pockets(dummy_pdb)
+            res = predictor.predict_pockets_from_pdb(dummy_pdb)
             if isinstance(res, list) and len(res) > 0:
                 first = res[0]
-                return first.get("status") == "COMPLETED" or (first.get("status") not in ("FAILED_EXECUTION", "FAILED_OUTPUT_PARSE"))
+                return (
+                    first.get("status") == "COMPLETED"
+                    and isinstance(first.get("center"), list)
+                    and len(first["center"]) == 3
+                    and first.get("score") is not None
+                )
             return False
     except Exception:
         return False

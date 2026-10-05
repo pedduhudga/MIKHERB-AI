@@ -129,7 +129,7 @@ class AIResearchAgent:
                     overall_status = "NOT_AVAILABLE"
 
                 return {
-                    "agent_response": f"Screening run (Status: {overall_status}). Boltz pKd: {res['boltz'].get('pKd_predicted') or 'NOT_INSTALLED'}, GNINA Affinity: {res['gnina'].get('affinity_kcal_mol') or 'NOT_INSTALLED'} kcal/mol.",
+                    "agent_response": f"Screening run (Status: {overall_status}). Boltz pIC50: {res['boltz'].get('pIC50_predicted') or 'NOT_INSTALLED'}, GNINA Affinity: {res['gnina'].get('affinity_kcal_mol') or 'NOT_INSTALLED'} kcal/mol.",
                     "tool_executed": "boltz_and_gnina",
                     "output_data": res,
                     "status": overall_status

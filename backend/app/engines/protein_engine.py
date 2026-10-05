@@ -49,6 +49,11 @@ class ProteinAnalyzer:
 class P2RankPocketPredictor:
     """Binding pocket prediction engine (P2Rank native binary / PDB ATOM geometric centroid fallback)."""
 
+    @classmethod
+    def predict_pockets(cls, pdb_filepath: str) -> List[Dict[str, Any]]:
+        """Alias for predict_pockets_from_pdb."""
+        return cls.predict_pockets_from_pdb(pdb_filepath)
+
     @staticmethod
     def predict_pockets_from_pdb(pdb_filepath: str) -> List[Dict[str, Any]]:
         """Parses actual 3D ATOM coordinates from PDB file or calls p2rank binary if installed."""
@@ -317,3 +322,7 @@ class ProteinEngine:
             "analysis": analysis,
             "pockets": pockets
         }
+
+# Alias for backward compatibility and clean adapter referencing
+P2RankAdapter = P2RankPocketPredictor
+

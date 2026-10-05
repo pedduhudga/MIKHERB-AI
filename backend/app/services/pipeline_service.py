@@ -492,8 +492,7 @@ class DiscoveryPipelineRunner:
                         "compound_code": comp.compound_code,
                         "smiles": comp.smiles,
                         "boltz_status": res["boltz"].get("status"),
-                        "boltz_pIC50": res["boltz"].get("pIC50_predicted") or res["boltz"].get("pKd_predicted"),
-                        "boltz_pKd": res["boltz"].get("pIC50_predicted") or res["boltz"].get("pKd_predicted"),
+                        "boltz_pIC50": res["boltz"].get("pIC50_predicted"),
                         "boltz_confidence": res["boltz"].get("complex_confidence_pLDDT"),
                         "boltz_native_confidence": res["boltz"].get("boltz_confidence_score"),
                         "gnina_status": res["gnina"].get("status"),
@@ -574,22 +573,22 @@ class DiscoveryPipelineRunner:
                             crop_pdb_path, comp.smiles, crop_pocket_center, protein_sequence=target.crop_sequence
                         )
 
-                        weed_pKd = weed_dock["boltz"].get("pKd_predicted") if weed_dock["boltz"].get("status") == "COMPLETED" else None
+                        weed_pIC50 = weed_dock["boltz"].get("pIC50_predicted") if weed_dock["boltz"].get("status") == "COMPLETED" else None
                         weed_gnina_aff = weed_dock["gnina"].get("affinity_kcal_mol") if weed_dock["gnina"].get("status") == "COMPLETED" else None
 
-                        crop_pKd = crop_dock["boltz"].get("pKd_predicted") if crop_dock["boltz"].get("status") == "COMPLETED" else None
+                        crop_pIC50 = crop_dock["boltz"].get("pIC50_predicted") if crop_dock["boltz"].get("status") == "COMPLETED" else None
                         crop_gnina_aff = crop_dock["gnina"].get("affinity_kcal_mol") if crop_dock["gnina"].get("status") == "COMPLETED" else None
 
-                        if weed_pKd is not None and crop_pKd is not None:
+                        if weed_pIC50 is not None and crop_pIC50 is not None:
                             sel_res = self.selectivity_engine.evaluate_selectivity(
-                                target.weed_sequence, target.crop_sequence, weed_affinity_pKd=weed_pKd, crop_affinity_pKd=crop_pKd
+                                target.weed_sequence, target.crop_sequence, weed_affinity_pKd=weed_pIC50, crop_affinity_pKd=crop_pIC50
                             )
                             target_sel_results.append({
                                 "target_gene": target.gene,
                                 "compound_code": comp.compound_code,
-                                "method": "Boltz-2 pKd Comparison",
-                                "weed_pKd": round(weed_pKd, 2),
-                                "crop_pKd": round(crop_pKd, 2),
+                                "method": "Boltz-2 pIC50 Comparison",
+                                "weed_pIC50": round(weed_pIC50, 2),
+                                "crop_pIC50": round(crop_pIC50, 2),
                                 "selectivity_score": sel_res["selectivity_score"],
                                 "fold_difference": sel_res["selectivity_fold_difference"],
                                 "status": "COMPLETED"
@@ -732,7 +731,7 @@ class DiscoveryPipelineRunner:
 
                 if primary_dock:
                     # Use stored Stage 4 scientific output — NO re-execution
-                    boltz_pKd = primary_dock.get("boltz_pIC50") or primary_dock.get("boltz_pKd")
+                    boltz_pIC50 = primary_dock.get("boltz_pIC50")
                     boltz_conf = primary_dock.get("boltz_confidence")
                     boltz_actual_status = primary_dock.get("boltz_status", "NOT_AVAILABLE")
                     gnina_cnn = primary_dock.get("gnina_cnn")
@@ -744,7 +743,7 @@ class DiscoveryPipelineRunner:
                     weed_dock = self.docking_engine.screen_candidate(
                         weed_pdb_path, comp.smiles, weed_pocket_center, protein_sequence=target.weed_sequence
                     )
-                    boltz_pKd = (weed_dock["boltz"].get("pIC50_predicted") or weed_dock["boltz"].get("pKd_predicted")) if weed_dock["boltz"].get("status") == "COMPLETED" else None
+                    boltz_pIC50 = weed_dock["boltz"].get("pIC50_predicted") if weed_dock["boltz"].get("status") == "COMPLETED" else None
                     boltz_conf = weed_dock["boltz"].get("complex_confidence_pLDDT") if weed_dock["boltz"].get("status") == "COMPLETED" else None
                     gnina_cnn = weed_dock["gnina"].get("cnn_score") if weed_dock["gnina"].get("status") == "COMPLETED" else None
                     gnina_aff = weed_dock["gnina"].get("affinity_kcal_mol") if weed_dock["gnina"].get("status") == "COMPLETED" else None
@@ -752,7 +751,7 @@ class DiscoveryPipelineRunner:
                     boltz_actual_status = weed_dock["boltz"].get("status", "NOT_AVAILABLE")
                     gnina_actual_status = weed_dock["gnina"].get("status", "NOT_AVAILABLE")
                 else:
-                    boltz_pKd, boltz_conf, gnina_cnn, gnina_aff = None, None, None, None
+                    boltz_pIC50, boltz_conf, gnina_cnn, gnina_aff = None, None, None, None
                     pose_agree = "POCKET_CENTER_MISSING"
                     boltz_actual_status = "POCKET_CENTER_MISSING"
                     gnina_actual_status = "POCKET_CENTER_MISSING"
@@ -764,7 +763,7 @@ class DiscoveryPipelineRunner:
                 consensus = self.consensus_engine.calculate_score(
                     target_relevance=dyn_target_relevance,
                     pocket_confidence=p_conf,
-                    boltz_pKd=boltz_pKd,
+                    boltz_pIC50=boltz_pIC50,
                     gnina_cnn_score=gnina_cnn,
                     pose_agreement=pose_agree,
                     crop_selectivity_score=sel_score,
@@ -773,7 +772,7 @@ class DiscoveryPipelineRunner:
                     safety_evidence_clean=None,
                 )
 
-                has_native_docking = (boltz_pKd is not None) or (gnina_aff is not None)
+                has_native_docking = (boltz_pIC50 is not None) or (gnina_aff is not None)
                 evidence_lvl = 1 if has_native_docking else 0
                 status_tag = "NATIVE_DOCKING_SUPPORTED" if has_native_docking else "HYPOTHESIS_ONLY"
 
@@ -784,7 +783,7 @@ class DiscoveryPipelineRunner:
                     target_name=target.name if target else "Unknown Target",
                     evidence_level=evidence_lvl,
                     boltz_status=boltz_actual_status,
-                    boltz_affinity_score=boltz_pKd,
+                    boltz_affinity_score=boltz_pIC50,
                     boltz_confidence=boltz_conf,
                     gnina_status=gnina_actual_status,
                     gnina_docking_score=gnina_aff,

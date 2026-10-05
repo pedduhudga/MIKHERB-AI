@@ -201,13 +201,14 @@ def test_docking_engine_missing_pocket_rejection():
 
 
 def test_docking_engine_surrogate_isolation():
-    """Surrogates must not report pKd_predicted or affinity_kcal_mol as real values."""
+    """Surrogates must not report pIC50_predicted or affinity_kcal_mol as real values."""
     de = AIDockingEngine()
     res = de.screen_candidate("dummy.pdb", "CC(=O)Oc1ccccc1C(=O)O", [10.0, 20.0, 30.0])
     if res["boltz"]["status"] == "NOT_INSTALLED":
-        assert res["boltz"]["pKd_predicted"] is None, (
-            "Surrogate must not produce a pKd_predicted value when Boltz is not installed."
+        assert res["boltz"]["pIC50_predicted"] is None, (
+            "Surrogate must not produce a pIC50_predicted value when Boltz is not installed."
         )
+        assert "pKd_predicted" not in res["boltz"], "Boltz output must NOT expose pKd_predicted"
         assert "surrogate_heuristic_score" in res["boltz"]
     if res["gnina"]["status"] == "NOT_INSTALLED":
         assert res["gnina"]["affinity_kcal_mol"] is None, (
@@ -407,7 +408,8 @@ def test_boltz2_native_execution_and_json_parser(tmp_path):
 
         assert res["status"] == "COMPLETED"
         assert res["complex_confidence_pLDDT"] == 93.4
-        assert res["pKd_predicted"] == 8.5
+        assert res["pIC50_predicted"] == 8.5
+        assert "pKd_predicted" not in res, "Boltz output must not contain pKd_predicted"
         assert res["estimated_affinity_nM"] == round(10 ** (9 - 8.5), 1)
         assert res["execution_mode"] == "NATIVE_BINARY"
 
@@ -427,7 +429,8 @@ def test_boltz2_native_malformed_output_fails_cleanly(tmp_path):
 
         res = adapter.predict_complex(dummy_pdb, "CC(=O)Oc1ccccc1C(=O)O", [10.0, 20.0, 30.0])
         assert res["status"] == "FAILED_OUTPUT_PARSE"
-        assert res["pKd_predicted"] is None
+        assert res["pIC50_predicted"] is None
+        assert "pKd_predicted" not in res
         assert res["complex_confidence_pLDDT"] is None
 
 
@@ -446,7 +449,8 @@ def test_boltz2_native_execution_failure(tmp_path):
 
         res = adapter.predict_complex(dummy_pdb, "CC(=O)Oc1ccccc1C(=O)O", [10.0, 20.0, 30.0])
         assert res["status"] == "FAILED_EXECUTION"
-        assert res["pKd_predicted"] is None
+        assert res["pIC50_predicted"] is None
+        assert "pKd_predicted" not in res
         assert res["complex_confidence_pLDDT"] is None
 
 
@@ -462,7 +466,7 @@ def test_scientific_engine_lifecycle_tiers():
 
     # 2. Installed but not yet validated
     with patch("shutil.which", return_value="/bin/fake_tool"):
-        eng = BaseScientificEngine("Test Engine", binary_name="fake_tool")
+        eng = BaseScientificEngine("Test Engine", binary_name="fake_tool", scientific_validator=lambda: True)
         status = eng.get_status()
         assert status["status"] == "INSTALLED"
         assert status["installed"] is True
@@ -1115,14 +1119,15 @@ def test_boltz_strict_schema_rejects_generic_affinity(tmp_path):
          patch("subprocess.run", side_effect=mock_run):
         res = adapter.predict_complex(dummy_pdb, "CC(=O)O", [10.0, 10.0, 10.0])
         assert res["status"] == "FAILED_OUTPUT_PARSE"
-        assert res["pKd_predicted"] is None
+        assert res["pIC50_predicted"] is None
+        assert "pKd_predicted" not in res
         assert res["complex_confidence_pLDDT"] is None
 
 
 def test_boltz_strict_schema_documented_units_conversion(tmp_path):
     """
     Scientific Integrity: Boltz-2 documented schema output must convert affinity_pred_value (log10 µM)
-    strictly via pKd = 6.0 - affinity_pred_value.
+    strictly to pIC50_predicted = 6.0 - affinity_pred_value. Must NOT expose pKd_predicted.
     """
     import json
     from app.engines.docking_engine import Boltz2Adapter
@@ -1146,7 +1151,7 @@ def test_boltz_strict_schema_documented_units_conversion(tmp_path):
         assert res["status"] == "COMPLETED"
         assert res["pIC50_predicted"] == 8.5  # 6.0 - (-2.5) = 8.5
         assert res["boltz_pIC50_predicted"] == 8.5
-        assert res["pKd_predicted"] == 8.5
+        assert "pKd_predicted" not in res, "Boltz native output must NOT expose pKd_predicted"
         assert res["complex_confidence_pLDDT"] == 91.5
         assert res["affinity_metric"] in ("log10_uM_IC50", "log_ic50_uM")
         assert res["affinity_raw_log_ic50_uM"] == -2.5
@@ -1415,8 +1420,104 @@ def test_boltz_missing_protein_sequence_returns_failed_input(tmp_path):
         assert res["status"] == "FAILED_INPUT"
         assert "PROTEIN_SEQUENCE_MISSING" in res["error"]
         assert res["pIC50_predicted"] is None
-        assert res["pKd_predicted"] is None
+        assert "pKd_predicted" not in res, "Boltz output must not contain pKd_predicted"
         assert res["boltz_complex_plddt"] is None
+
+
+def test_engine_without_scientific_validator_is_never_scientifically_validated():
+    """
+    Scientific Integrity: An engine with NO scientific validator must NEVER
+    claim SCIENTIFICALLY_VALIDATED. It remains at most PROBE_VALIDATED.
+    """
+    from app.engines.base import BaseScientificEngine
+
+    # Engine with probe command but no scientific validator (e.g. DiffDock, OpenMM)
+    eng = BaseScientificEngine(
+        name="DiffDock Pose Generator",
+        binary_name="diffdock",
+        validation_args=["--help"],
+        scientific_validator=None
+    )
+
+    with patch("shutil.which", return_value="/usr/local/bin/diffdock"), \
+         patch("subprocess.run", return_value=MagicMock(returncode=0, stdout="diffdock v1.0", stderr="")):
+        res = eng.scientific_validate()
+        assert res["status"] == "PROBE_VALIDATED"
+        assert res["probe_validated"] is True
+        assert res["scientifically_validated"] is False
+        assert res["is_scientifically_validated"] is False
+        assert res["status"] != "SCIENTIFICALLY_VALIDATED"
+
+
+def test_p2rank_scientific_validator_strictness(tmp_path):
+    """
+    Scientific Integrity: _validate_p2rank must use P2RankPocketPredictor
+    and strictly verify COMPLETED status, valid center coordinates, and score.
+    """
+    from app.engines.status_manager import _validate_p2rank
+
+    dummy_pdb = str(tmp_path / "fixture.pdb")
+    with open(dummy_pdb, "w") as f:
+        f.write("ATOM      1  CA  MET A   1      10.000  10.000  10.000  1.00 88.00           C\n")
+
+    # 1. P2Rank binary not installed -> returns False
+    with patch("shutil.which", return_value=None):
+        assert _validate_p2rank() is False
+
+    # 2. P2Rank binary installed and returns valid fixture pocket -> returns True
+    valid_pocket = [{
+        "status": "COMPLETED",
+        "center": [10.0, 20.0, 30.0],
+        "score": 12.5,
+        "druggability_score": 0.85
+    }]
+    with patch("shutil.which", return_value="/usr/local/bin/p2rank"), \
+         patch("app.engines.protein_engine.P2RankPocketPredictor.predict_pockets_from_pdb", return_value=valid_pocket):
+        assert _validate_p2rank() is True
+
+    # 3. P2Rank binary installed but returns malformed or non-completed pocket -> returns False
+    invalid_pocket = [{
+        "status": "FAILED_OUTPUT_PARSE",
+        "center": None,
+        "score": None
+    }]
+    with patch("shutil.which", return_value="/usr/local/bin/p2rank"), \
+         patch("app.engines.protein_engine.P2RankPocketPredictor.predict_pockets_from_pdb", return_value=invalid_pocket):
+        assert _validate_p2rank() is False
+
+
+def test_boltz_scientific_validator_fixture_execution(tmp_path):
+    """
+    Scientific Integrity: _validate_boltz must execute an actual fixture prediction
+    and verify COMPLETED status, pIC50_predicted, and boltz_complex_plddt.
+    """
+    from app.engines.status_manager import _validate_boltz
+
+    # 1. Boltz binary not installed -> returns False
+    with patch("shutil.which", return_value=None):
+        assert _validate_boltz() is False
+
+    # 2. Boltz binary installed and fixture prediction succeeds -> returns True
+    success_res = {
+        "status": "COMPLETED",
+        "pIC50_predicted": 8.5,
+        "boltz_complex_plddt": 0.92,
+        "confidence_scale": "0_to_1"
+    }
+    with patch("shutil.which", return_value="/usr/local/bin/boltz"), \
+         patch("app.engines.docking_engine.Boltz2Adapter.predict_complex", return_value=success_res):
+        assert _validate_boltz() is True
+
+    # 3. Boltz binary installed but fixture prediction fails -> returns False
+    fail_res = {
+        "status": "FAILED_OUTPUT_PARSE",
+        "pIC50_predicted": None,
+        "boltz_complex_plddt": None
+    }
+    with patch("shutil.which", return_value="/usr/local/bin/boltz"), \
+         patch("app.engines.docking_engine.Boltz2Adapter.predict_complex", return_value=fail_res):
+        assert _validate_boltz() is False
+
 
 
 

@@ -131,9 +131,9 @@ class BaseScientificEngine:
                 self._scientifically_validated = False
                 self._validation_error = f"Scientific validation exception: {e}"
         else:
-            self._scientifically_validated = True
+            self._scientifically_validated = False
             self._validation_error = None
-            self._scientific_summary = "Default self-test passed"
+            self._scientific_summary = "No scientific validation workflow defined (probe validation only)"
 
         return self.get_status()
 
