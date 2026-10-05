@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from app.engines.molecular_generation.schemas import (
     GenerationMode, GenerationRunStatus, MolecularFilterConfig,
     GeneratedMoleculeDetail, ChemicalProperties, NoveltyCategory,
