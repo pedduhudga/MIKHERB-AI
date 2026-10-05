@@ -57,36 +57,96 @@ class P2RankPocketPredictor:
 
         p2rank_bin = shutil.which("p2rank")
         if p2rank_bin:
+            output_dir = os.path.join(os.path.dirname(pdb_filepath), "p2rank_out")
+            os.makedirs(output_dir, exist_ok=True)
+            cmd = [p2rank_bin, "predict", "-f", pdb_filepath, "-o", output_dir]
             try:
-                output_dir = os.path.join(os.path.dirname(pdb_filepath), "p2rank_out")
-                os.makedirs(output_dir, exist_ok=True)
-                cmd = [p2rank_bin, "predict", "-f", pdb_filepath, "-o", output_dir]
                 res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-                if res.returncode == 0:
-                    predictions_csv = os.path.join(output_dir, f"{os.path.basename(pdb_filepath)}_predictions.csv")
-                    if os.path.exists(predictions_csv):
-                        pockets = []
-                        with open(predictions_csv, "r") as f:
-                            lines = f.readlines()
-                            for idx, line in enumerate(lines[1:], 1):
-                                parts = line.strip().split(",")
-                                if len(parts) >= 6:
-                                    pockets.append({
-                                        "pocket_id": idx,
-                                        "name": f"P2Rank Native Predicted Pocket {idx}",
-                                        "center": [float(parts[3]), float(parts[4]), float(parts[5])],
-                                        "score": float(parts[1]),
-                                        "druggability_score": float(parts[2]),
-                                        "source": "P2Rank Native Binary",
-                                        "status": "COMPLETED"
-                                    })
-                        if pockets:
-                            return pockets
-            except Exception:
-                pass
+            except Exception as e:
+                return [{
+                    "pocket_id": 1,
+                    "name": "P2Rank Native Execution Exception",
+                    "center": None,
+                    "score": None,
+                    "druggability_score": None,
+                    "source": "P2Rank Native Binary",
+                    "status": "FAILED_EXECUTION",
+                    "error": str(e)
+                }]
 
+            if res.returncode != 0:
+                return [{
+                    "pocket_id": 1,
+                    "name": "P2Rank Native Execution Failure",
+                    "center": None,
+                    "score": None,
+                    "druggability_score": None,
+                    "source": "P2Rank Native Binary",
+                    "status": "FAILED_EXECUTION",
+                    "error": res.stderr.strip() or f"P2Rank binary exited with code {res.returncode}"
+                }]
+
+            predictions_csv = os.path.join(output_dir, f"{os.path.basename(pdb_filepath)}_predictions.csv")
+            if not os.path.exists(predictions_csv):
+                return [{
+                    "pocket_id": 1,
+                    "name": "P2Rank Native Output Missing",
+                    "center": None,
+                    "score": None,
+                    "druggability_score": None,
+                    "source": "P2Rank Native Binary",
+                    "status": "FAILED_OUTPUT_PARSE",
+                    "error": f"P2Rank completed with exit code 0 but predictions CSV was not found: {predictions_csv}"
+                }]
+
+            pockets = []
+            try:
+                with open(predictions_csv, "r") as f:
+                    lines = f.readlines()
+                    for idx, line in enumerate(lines[1:], 1):
+                        parts = line.strip().split(",")
+                        if len(parts) >= 6:
+                            try:
+                                pockets.append({
+                                    "pocket_id": idx,
+                                    "name": f"P2Rank Native Predicted Pocket {idx}",
+                                    "center": [float(parts[3]), float(parts[4]), float(parts[5])],
+                                    "score": float(parts[1]),
+                                    "druggability_score": float(parts[2]),
+                                    "source": "P2Rank Native Binary",
+                                    "status": "COMPLETED"
+                                })
+                            except (ValueError, IndexError):
+                                continue
+            except Exception as e:
+                return [{
+                    "pocket_id": 1,
+                    "name": "P2Rank Native Output Parse Error",
+                    "center": None,
+                    "score": None,
+                    "druggability_score": None,
+                    "source": "P2Rank Native Binary",
+                    "status": "FAILED_OUTPUT_PARSE",
+                    "error": f"Failed to parse P2Rank predictions CSV: {e}"
+                }]
+
+            if pockets:
+                return pockets
+
+            return [{
+                "pocket_id": 1,
+                "name": "P2Rank Native Empty Predictions",
+                "center": None,
+                "score": None,
+                "druggability_score": None,
+                "source": "P2Rank Native Binary",
+                "status": "FAILED_OUTPUT_PARSE",
+                "error": "P2Rank executed successfully but no pockets were identified in predictions CSV."
+            }]
+
+        # P2Rank is genuinely absent from system PATH: run geometric centroid fallback
         atoms = []
-        plddt_scores = []
+        temp_factors = []
         with open(pdb_filepath, "r") as f:
             for line in f:
                 if line.startswith("ATOM") or line.startswith("HETATM"):
@@ -96,9 +156,9 @@ class P2RankPocketPredictor:
                         z = float(line[46:54].strip())
                         res_name = line[17:20].strip()
                         res_seq = int(line[22:26].strip())
-                        temp_factor = float(line[60:66].strip())
+                        tf = float(line[60:66].strip())
                         atoms.append({"x": x, "y": y, "z": z, "res_name": res_name, "res_seq": res_seq})
-                        plddt_scores.append(temp_factor)
+                        temp_factors.append(tf)
                     except ValueError:
                         continue
 
@@ -108,7 +168,13 @@ class P2RankPocketPredictor:
         avg_x = sum(a["x"] for a in atoms) / len(atoms)
         avg_y = sum(a["y"] for a in atoms) / len(atoms)
         avg_z = sum(a["z"] for a in atoms) / len(atoms)
-        avg_plddt = sum(plddt_scores) / len(plddt_scores) if plddt_scores else None
+        avg_tf = sum(temp_factors) / len(temp_factors) if temp_factors else None
+
+        # Scientific integrity: Temperature factor is only pLDDT if structure is an AlphaFold model
+        pdb_basename = os.path.basename(pdb_filepath).upper()
+        is_alphafold = pdb_basename.startswith("AF-") or "ALPHAFOLD" in pdb_filepath.upper()
+        plddt_avg = round(avg_tf, 1) if (is_alphafold and avg_tf is not None) else None
+        b_factor_avg = round(avg_tf, 2) if (not is_alphafold and avg_tf is not None) else None
 
         cat_atoms = [a for a in atoms if a["res_name"] in ["HIS", "ASP", "GLU", "SER", "CYS", "TYR"]]
         if cat_atoms:
@@ -124,7 +190,9 @@ class P2RankPocketPredictor:
                 "name": "Heuristic Geometric Site — P2Rank Not Installed",
                 "center": [round(c_x, 3), round(c_y, 3), round(c_z, 3)],
                 "score": None,
-                "plddt_avg": round(avg_plddt, 1) if avg_plddt else None,
+                "plddt_avg": plddt_avg,
+                "b_factor_avg": b_factor_avg,
+                "is_alphafold_model": is_alphafold,
                 "volume_A3": None,
                 "druggability_score": None,
                 "source": "Geometric Centroid Analysis (P2Rank Binary Not Installed)",

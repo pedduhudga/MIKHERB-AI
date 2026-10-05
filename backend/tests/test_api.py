@@ -216,7 +216,7 @@ def test_system_engines_validate_endpoint():
     assert "rdkit" in data
     assert "gnina" in data
     assert "boltz" in data
-    assert data["rdkit"]["status"] in ("VALIDATED", "INSTALLED")
+    assert data["rdkit"]["status"] in ("SCIENTIFICALLY_VALIDATED", "PROBE_VALIDATED", "VALIDATED", "INSTALLED")
 
 
 def test_firebase_auth_production_default(monkeypatch):
@@ -225,4 +225,47 @@ def test_firebase_auth_production_default(monkeypatch):
     monkeypatch.delenv("REQUIRE_FIREBASE_AUTH", raising=False)
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     assert is_auth_required() is True
+
+
+def test_unauthenticated_access_to_protected_endpoints(monkeypatch):
+    """Verify that all non-health endpoints return 401 when unauthenticated under REQUIRE_FIREBASE_AUTH."""
+    monkeypatch.setenv("REQUIRE_FIREBASE_AUTH", "true")
+
+    # 1. Health/Connectivity endpoints are public (200)
+    assert client.get("/api/v1/system/hardware").status_code == 200
+    assert client.get("/api/v1/system/firebase").status_code == 200
+
+    # 2. Engines, chemistry, formulation, experiments, AI lab, and agent endpoints require auth (401)
+    assert client.get("/api/v1/system/engines").status_code == 401
+    assert client.post("/api/v1/system/engines/validate").status_code == 401
+    assert client.post("/api/v1/system/engines/probe").status_code == 401
+    assert client.post("/api/v1/system/engines/validate_scientific").status_code == 401
+    assert client.get("/api/v1/chemistry/descriptors?smiles=CC").status_code == 401
+    assert client.get("/api/v1/chemistry/pubchem_search?query=glyphosate").status_code == 401
+    assert client.get("/api/v1/formulation").status_code == 401
+    assert client.get("/api/v1/experiments").status_code == 401
+    assert client.post("/api/v1/ai_lab/train_qsar").status_code == 401
+    assert client.post("/api/v1/ai_lab/active_learning_prioritize", json=["CC"]).status_code == 401
+    assert client.post("/api/v1/agent/chat", params={"query": "test"}).status_code == 401
+    assert client.get("/api/v1/agent/tools").status_code == 401
+
+
+def test_configurable_downstream_target_count():
+    """Verify that projects can configure downstream_target_count (Top 1, 3, 5, etc)."""
+    payload = {
+        "name": "Configurable Top-N Discovery",
+        "weed_species": "Palmer Amaranth",
+        "crop_species": "Soybean",
+        "objective": "new_herbicide",
+        "downstream_target_count": 5
+    }
+    resp = client.post("/api/v1/projects", json=payload)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["downstream_target_count"] == 5
+
+    get_resp = client.get(f"/api/v1/projects/{data['id']}")
+    assert get_resp.status_code == 200
+    assert get_resp.json()["downstream_target_count"] == 5
+
 

@@ -329,53 +329,70 @@ class Boltz2Adapter:
                 res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
                 if res.returncode == 0:
                     plddt = None
+                    conf_score = None
                     pkd = None
+                    raw_log_ic50 = None
+                    prob_binder = None
 
-                    # Search for confidence and affinity JSON files produced by Boltz-2
+                    # Search strictly for documented Boltz-2 output JSON files
                     for root, dirs, files in os.walk(tmpdir):
                         for f in files:
-                            if not f.endswith(".json"):
-                                continue
                             file_path = os.path.join(root, f)
-                            try:
-                                with open(file_path, "r") as jf:
-                                    data = json.load(jf)
-                                    if not isinstance(data, dict):
-                                        continue
 
-                                    # Confidence JSON metrics
-                                    if plddt is None:
-                                        if "complex_plddt" in data:
-                                            plddt = float(data["complex_plddt"])
-                                        elif "confidence_score" in data:
-                                            plddt = float(data["confidence_score"]) * 100.0 if float(data["confidence_score"]) <= 1.0 else float(data["confidence_score"])
-                                        elif "plddt" in data:
-                                            plddt = float(data["plddt"])
+                            # 1. Parse confidence_*.json strictly
+                            if f.startswith("confidence") and f.endswith(".json"):
+                                try:
+                                    with open(file_path, "r") as jf:
+                                        c_data = json.load(jf)
+                                        if isinstance(c_data, dict):
+                                            if "complex_plddt" in c_data:
+                                                plddt = float(c_data["complex_plddt"])
+                                            elif "plddt" in c_data:
+                                                plddt = float(c_data["plddt"])
+                                            elif "confidence_score" in c_data:
+                                                val = float(c_data["confidence_score"])
+                                                conf_score = val
+                                                plddt = val * 100.0 if val <= 1.0 else val
+                                            if "confidence_score" in c_data and conf_score is None:
+                                                conf_score = float(c_data["confidence_score"])
+                                except Exception:
+                                    continue
 
-                                    # Affinity JSON metrics
-                                    if pkd is None:
-                                        if "pKd" in data:
-                                            pkd = float(data["pKd"])
-                                        elif "affinity" in data:
-                                            pkd = float(data["affinity"])
-                                        elif "affinity_pred_value" in data:
-                                            # Boltz-2 log(IC50 in µM); pKd/pIC50 = 6.0 - log(IC50 µM)
-                                            val = float(data["affinity_pred_value"])
-                                            pkd = round(6.0 - val, 2)
-                                        elif "affinity_pred_value1" in data:
-                                            val1 = float(data["affinity_pred_value1"])
-                                            val2 = float(data.get("affinity_pred_value2", val1))
-                                            avg_val = (val1 + val2) / 2.0
-                                            pkd = round(6.0 - avg_val, 2)
-                            except Exception:
-                                continue
+                            # 2. Parse affinity_*.json strictly
+                            elif f.startswith("affinity") and f.endswith(".json"):
+                                try:
+                                    with open(file_path, "r") as jf:
+                                        a_data = json.load(jf)
+                                        if isinstance(a_data, dict):
+                                            if "affinity_pred_value" in a_data:
+                                                # Documented Boltz-2 schema: log10(IC50 in µM)
+                                                raw_log_ic50 = float(a_data["affinity_pred_value"])
+                                                pkd = round(6.0 - raw_log_ic50, 2)
+                                            elif "affinity_pred_value1" in a_data:
+                                                v1 = float(a_data["affinity_pred_value1"])
+                                                v2 = float(a_data.get("affinity_pred_value2", v1))
+                                                raw_log_ic50 = (v1 + v2) / 2.0
+                                                pkd = round(6.0 - raw_log_ic50, 2)
+                                            elif "pKd" in a_data:
+                                                pkd = float(a_data["pKd"])
+                                                raw_log_ic50 = round(6.0 - pkd, 2)
+
+                                            if "affinity_probability_binary" in a_data:
+                                                prob_binder = float(a_data["affinity_probability_binary"])
+                                except Exception:
+                                    continue
 
                     if plddt is not None and pkd is not None:
+                        estimated_nm = round(10 ** (9 - float(pkd)), 1)
                         return {
                             "engine": "Boltz-2 AI Native Executable",
-                            "pKd_predicted": float(pkd),
-                            "estimated_affinity_nM": round(10 ** (9 - float(pkd)), 1),
-                            "complex_confidence_pLDDT": float(plddt),
+                            "pKd_predicted": round(float(pkd), 2),
+                            "estimated_affinity_nM": estimated_nm,
+                            "complex_confidence_pLDDT": round(float(plddt), 1),
+                            "affinity_metric": "log_ic50_uM",
+                            "affinity_raw_log_ic50_uM": raw_log_ic50,
+                            "affinity_probability_binary": prob_binder,
+                            "confidence_score": conf_score,
                             "execution_mode": "NATIVE_BINARY",
                             "status": "COMPLETED"
                         }
@@ -385,7 +402,7 @@ class Boltz2Adapter:
                         "status": "FAILED_OUTPUT_PARSE",
                         "pKd_predicted": None,
                         "complex_confidence_pLDDT": None,
-                        "error": "Boltz-2 executed but output prediction JSON was missing or incomplete."
+                        "error": "Boltz-2 executed but required confidence_*.json or affinity_*.json fields were missing or invalid."
                     }
                 else:
                     return {

@@ -9,6 +9,7 @@ class ProjectBase(BaseModel):
     weed_species: str
     crop_species: str
     objective: str
+    downstream_target_count: Optional[int] = 3
     notes: Optional[str] = None
 
 class ProjectCreate(ProjectBase):

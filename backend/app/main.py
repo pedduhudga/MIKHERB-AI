@@ -63,13 +63,23 @@ def get_hardware_status():
     return check_hardware_status()
 
 @app.get("/api/v1/system/engines")
-def get_engines_status():
+def get_engines_status(current_user: Dict[str, Any] = Depends(get_current_user)):
     return engine_status_manager.get_all_statuses()
 
 @app.post("/api/v1/system/engines/validate")
-def validate_engines():
-    """Live probe validation across all scientific engines."""
+def validate_engines(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Complete probe and scientific validation across all engines."""
     return engine_status_manager.validate_all()
+
+@app.post("/api/v1/system/engines/probe")
+def probe_engines(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Live CLI probe validation (--version, --help, imports) across scientific engines."""
+    return engine_status_manager.probe_all()
+
+@app.post("/api/v1/system/engines/validate_scientific")
+def validate_engines_scientifically(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Deep scientific fixture verification workflows across scientific engines."""
+    return engine_status_manager.scientifically_validate_all()
 
 @app.get("/api/v1/system/firebase")
 def get_firebase_status():
@@ -213,14 +223,20 @@ def get_project_targets(
 
 # Chemical Intelligence
 @app.get("/api/v1/chemistry/descriptors")
-def calculate_chemical_descriptors(smiles: str = Query(...)):
+def calculate_chemical_descriptors(
+    smiles: str = Query(...),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     desc = chemical_engine.calculate_descriptors(smiles)
     if not desc:
         raise HTTPException(status_code=400, detail="Invalid SMILES string")
     return desc
 
 @app.get("/api/v1/chemistry/pubchem_search")
-def pubchem_search(query: str = Query(...)):
+def pubchem_search(
+    query: str = Query(...),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     res = chemical_engine.fetch_pubchem_compound(query)
     if not res:
         raise HTTPException(status_code=404, detail="Compound not found in PubChem")
@@ -265,7 +281,10 @@ def analyze_formulation_endpoint(
     return db_form
 
 @app.get("/api/v1/formulation", response_model=List[FormulationResponse])
-def list_formulations(db: Session = Depends(get_db)):
+def list_formulations(
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     return db.query(Formulation).all()
 
 # Experiments & Active Learning
@@ -296,11 +315,17 @@ def record_experiment_trial(
     return db_trial
 
 @app.get("/api/v1/experiments", response_model=List[ExperimentTrialResponse])
-def list_experiment_trials(db: Session = Depends(get_db)):
+def list_experiment_trials(
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     return db.query(ExperimentTrial).all()
 
 @app.post("/api/v1/ai_lab/train_qsar")
-def train_qsar_model(db: Session = Depends(get_db)):
+def train_qsar_model(
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     trials = db.query(ExperimentTrial).all()
     if not trials:
         return {
@@ -315,14 +340,21 @@ def train_qsar_model(db: Session = Depends(get_db)):
     return qsar_engine.train_qsar(smiles_list, act_list)
 
 @app.post("/api/v1/ai_lab/active_learning_prioritize")
-def active_learning_prioritize(smiles_list: List[str]):
+def active_learning_prioritize(
+    smiles_list: List[str],
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     return qsar_engine.predict_with_uncertainty(smiles_list)
 
 # AI Research Agent Interface
 @app.post("/api/v1/agent/chat")
-def agent_chat(query: str, context: Optional[Dict[str, Any]] = None):
+def agent_chat(
+    query: str,
+    context: Optional[Dict[str, Any]] = None,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     return agent_service.execute_agent_query(query, context)
 
 @app.get("/api/v1/agent/tools")
-def get_agent_tools():
+def get_agent_tools(current_user: Dict[str, Any] = Depends(get_current_user)):
     return agent_service.available_tools()

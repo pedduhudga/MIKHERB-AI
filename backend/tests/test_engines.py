@@ -1014,3 +1014,168 @@ def test_target_discovery_gene_alias_strict_exact_matching():
         assert res_good["gene_verified"] is True
         assert res_good["function_verified"] is True
 
+
+def test_p2rank_installed_execution_failure_state_machine(tmp_path):
+    """
+    Scientific Integrity: If P2Rank binary is found on PATH but execution fails,
+    status must be FAILED_EXECUTION, NEVER NOT_INSTALLED.
+    """
+    from app.engines.protein_engine import P2RankPocketPredictor
+    predictor = P2RankPocketPredictor()
+
+    dummy_pdb = str(tmp_path / "test.pdb")
+    with open(dummy_pdb, "w") as f:
+        f.write("ATOM      1  CA  MET A   1      10.000  10.000  10.000  1.00 45.00           C\n")
+
+    with patch("shutil.which", return_value="/opt/p2rank/p2rank"), \
+         patch("subprocess.run") as mock_sub:
+        mock_sub.return_value = MagicMock(returncode=1, stderr="OutOfMemoryError: Java heap space")
+        res = predictor.predict_pockets(dummy_pdb)
+        assert len(res) == 1
+        assert res[0]["status"] == "FAILED_EXECUTION"
+        assert res[0]["status"] != "NOT_INSTALLED"
+        assert "Java heap space" in res[0]["error"]
+
+
+def test_p2rank_installed_missing_output_state_machine(tmp_path):
+    """
+    Scientific Integrity: If P2Rank binary executes with code 0 but CSV is missing or malformed,
+    status must be FAILED_OUTPUT_PARSE, NEVER NOT_INSTALLED.
+    """
+    from app.engines.protein_engine import P2RankPocketPredictor
+    predictor = P2RankPocketPredictor()
+
+    dummy_pdb = str(tmp_path / "target.pdb")
+    with open(dummy_pdb, "w") as f:
+        f.write("ATOM      1  CA  MET A   1      10.000  10.000  10.000  1.00 45.00           C\n")
+
+    with patch("shutil.which", return_value="/opt/p2rank/p2rank"), \
+         patch("subprocess.run") as mock_sub:
+        mock_sub.return_value = MagicMock(returncode=0, stdout="P2Rank completed successfully", stderr="")
+        res = predictor.predict_pockets(dummy_pdb)
+        assert len(res) == 1
+        assert res[0]["status"] == "FAILED_OUTPUT_PARSE"
+        assert res[0]["status"] != "NOT_INSTALLED"
+
+
+def test_pdb_b_factor_integrity_not_plddt(tmp_path):
+    """
+    Scientific Integrity: Arbitrary PDB crystallographic B-factors must NOT be reported as pLDDT.
+    Only structures identified as AlphaFold models can populate plddt_avg.
+    """
+    from app.engines.protein_engine import P2RankPocketPredictor
+    predictor = P2RankPocketPredictor()
+
+    # Experimental PDB (crystallographic B-factor = 32.5)
+    exp_pdb = str(tmp_path / "crystal_structure_1abc.pdb")
+    with open(exp_pdb, "w") as f:
+        f.write("ATOM      1  CA  MET A   1      10.000  10.000  10.000  1.00 32.50           C\n")
+
+    with patch("shutil.which", return_value=None):
+        res = predictor.predict_pockets(exp_pdb)
+        assert len(res) == 1
+        assert res[0]["status"] == "NOT_INSTALLED"
+        assert res[0]["is_alphafold_model"] is False
+        assert res[0]["plddt_avg"] is None, "Experimental PDB must NOT set plddt_avg"
+        assert res[0]["b_factor_avg"] == 32.5
+
+    # AlphaFold PDB (B-factor encodes pLDDT = 88.0)
+    af_pdb = str(tmp_path / "AF-P10324-F1-model_v4.pdb")
+    with open(af_pdb, "w") as f:
+        f.write("ATOM      1  CA  MET A   1      10.000  10.000  10.000  1.00 88.00           C\n")
+
+    with patch("shutil.which", return_value=None):
+        res_af = predictor.predict_pockets(af_pdb)
+        assert len(res_af) == 1
+        assert res_af[0]["is_alphafold_model"] is True
+        assert res_af[0]["plddt_avg"] == 88.0
+        assert res_af[0]["b_factor_avg"] is None
+
+
+def test_boltz_strict_schema_rejects_generic_affinity(tmp_path):
+    """
+    Scientific Integrity: Boltz parser must reject generic 'affinity' keys and non-documented schema.
+    """
+    import json
+    from app.engines.docking_engine import Boltz2Adapter
+    adapter = Boltz2Adapter()
+
+    dummy_pdb = str(tmp_path / "target.pdb")
+    with open(dummy_pdb, "w") as f:
+        f.write("ATOM      1  CA  MET A   1      10.000  10.000  10.000  1.00 88.00           C\n")
+
+    def mock_run(cmd, *args, **kwargs):
+        out_dir = cmd[cmd.index("--out_dir") + 1]
+        # Write generic json with "affinity": -8.5 (NOT documented schema)
+        with open(os.path.join(out_dir, "other_output.json"), "w") as f:
+            json.dump({"affinity": -8.5, "score": 90.0}, f)
+        return MagicMock(returncode=0)
+
+    with patch("shutil.which", return_value="/usr/local/bin/boltz"), \
+         patch("subprocess.run", side_effect=mock_run):
+        res = adapter.predict_complex(dummy_pdb, "CC(=O)O", [10.0, 10.0, 10.0])
+        assert res["status"] == "FAILED_OUTPUT_PARSE"
+        assert res["pKd_predicted"] is None
+        assert res["complex_confidence_pLDDT"] is None
+
+
+def test_boltz_strict_schema_documented_units_conversion(tmp_path):
+    """
+    Scientific Integrity: Boltz-2 documented schema output must convert affinity_pred_value (log10 µM)
+    strictly via pKd = 6.0 - affinity_pred_value.
+    """
+    import json
+    from app.engines.docking_engine import Boltz2Adapter
+    adapter = Boltz2Adapter()
+
+    dummy_pdb = str(tmp_path / "target.pdb")
+    with open(dummy_pdb, "w") as f:
+        f.write("ATOM      1  CA  MET A   1      10.000  10.000  10.000  1.00 88.00           C\n")
+
+    def mock_run(cmd, *args, **kwargs):
+        out_dir = cmd[cmd.index("--out_dir") + 1]
+        with open(os.path.join(out_dir, "confidence_model_0.json"), "w") as f:
+            json.dump({"complex_plddt": 91.5, "confidence_score": 0.89}, f)
+        with open(os.path.join(out_dir, "affinity_model_0.json"), "w") as f:
+            json.dump({"affinity_pred_value": -2.5, "affinity_probability_binary": 0.95}, f)
+        return MagicMock(returncode=0)
+
+    with patch("shutil.which", return_value="/usr/local/bin/boltz"), \
+         patch("subprocess.run", side_effect=mock_run):
+        res = adapter.predict_complex(dummy_pdb, "CC(=O)O", [10.0, 10.0, 10.0])
+        assert res["status"] == "COMPLETED"
+        assert res["pKd_predicted"] == 8.5  # 6.0 - (-2.5) = 8.5
+        assert res["complex_confidence_pLDDT"] == 91.5
+        assert res["affinity_metric"] == "log_ic50_uM"
+        assert res["affinity_raw_log_ic50_uM"] == -2.5
+        assert res["affinity_probability_binary"] == 0.95
+
+
+def test_engine_validation_tiers_probe_vs_scientific():
+    """
+    Engine Lifecycle: Test distinct tiers PROBE_VALIDATED vs SCIENTIFICALLY_VALIDATED.
+    """
+    from app.engines.base import BaseScientificEngine
+
+    # Dummy engine with custom probe and scientific validator
+    engine = BaseScientificEngine(
+        name="Test Simulation Engine",
+        binary_name="dummy_tool",
+        validation_args=["--version"],
+        scientific_validator=lambda: True
+    )
+
+    with patch("shutil.which", return_value="/usr/bin/dummy_tool"), \
+         patch("subprocess.run", return_value=MagicMock(returncode=0, stdout="dummy_tool v1.2.3")):
+        # Probe validation: verifies executable responds to probe
+        probe_res = engine.probe_validate()
+        assert probe_res["status"] == "PROBE_VALIDATED"
+        assert probe_res["is_installed"] is True
+        assert probe_res["is_probe_validated"] is True
+
+        # Scientific validation: executes scientific workflow test
+        sci_res = engine.scientific_validate()
+        assert sci_res["status"] == "SCIENTIFICALLY_VALIDATED"
+        assert sci_res["is_scientifically_validated"] is True
+
+

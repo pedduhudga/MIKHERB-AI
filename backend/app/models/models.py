@@ -13,6 +13,7 @@ class Project(Base):
     weed_species = Column(String, nullable=False)
     crop_species = Column(String, nullable=False)
     objective = Column(String, nullable=False)  # e.g., "new_herbicide", "improve_selectivity"
+    downstream_target_count = Column(Integer, default=3)
     notes = Column(Text, nullable=True)
     status = Column(String, default="active")
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
