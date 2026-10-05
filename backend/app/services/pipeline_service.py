@@ -412,10 +412,10 @@ class DiscoveryPipelineRunner:
 
                 p_conf = target.pockets_json[0].get("plddt_avg") if (is_weed_p2rank and target.pockets_json) else None
 
-                plddt_val = (target.structure_confidence or 70.0) if target else 70.0
-                crop_div_val = (target.crop_divergence_score or 50.0) if target else 50.0
-                essentiality_val = (target.essentiality_score or 50.0) if target else 50.0
-                dyn_target_relevance = round(min(100.0, max(10.0, (plddt_val * 0.4) + (crop_div_val * 0.3) + (essentiality_val * 0.3))), 1)
+                if target and target.structure_confidence is not None and target.crop_divergence_score is not None and target.essentiality_score is not None:
+                    dyn_target_relevance = round(min(100.0, max(0.0, (target.structure_confidence * 0.4) + (target.crop_divergence_score * 0.3) + (target.essentiality_score * 0.3))), 1)
+                else:
+                    dyn_target_relevance = None
 
                 consensus = self.consensus_engine.calculate_score(
                     target_relevance=dyn_target_relevance,
