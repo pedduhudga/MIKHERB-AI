@@ -21,5 +21,5 @@ class BaseScientificEngine:
             "installed": installed,
             "binary_name": self.binary_name,
             "status": "READY" if installed else "NOT_INSTALLED",
-            "execution_mode": "NATIVE_BINARY" if installed else "SURREGATE_HEURISTIC_AVAILABLE"
+            "execution_mode": "NATIVE_BINARY" if installed else "SURROGATE_HEURISTIC_AVAILABLE"
         }

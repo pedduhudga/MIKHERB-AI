@@ -662,17 +662,12 @@ class DiscoveryPipelineRunner:
                 self.db.add(candidate)
             self.db.commit()
 
-            # FIX: Report preserves actual engine status codes, not generic NOT_INSTALLED
+            # Use stored status codes from DB — avoids re-running docking just for report generation.
+            # boltz_status and gnina_status are persisted on each Candidate during the primary scoring loop.
             cand_data_for_report = []
             for c in self.db.query(Candidate).filter_by(project_id=project.id).order_by(Candidate.mikherb_score.desc()).all():
-                # Re-run docking to get actual status for the report (or fetch from stored data)
-                if weed_pocket_center:
-                    dock_res = self.docking_engine.screen_candidate(weed_pdb_path, c.smiles, weed_pocket_center)
-                    boltz_report_status = dock_res["boltz"].get("status", "NOT_AVAILABLE")
-                    gnina_report_status = dock_res["gnina"].get("status", "NOT_AVAILABLE")
-                else:
-                    boltz_report_status = "POCKET_CENTER_MISSING"
-                    gnina_report_status = "POCKET_CENTER_MISSING"
+                boltz_report_status = c.boltz_status or "NOT_AVAILABLE"
+                gnina_report_status = c.gnina_status or "NOT_AVAILABLE"
 
                 cand_data_for_report.append({
                     "code":         c.compound_code,

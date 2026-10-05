@@ -1,5 +1,5 @@
 """
-Multi-Target Discovery Engine for MikHerb-AI (Evidence Integrity v6 + Target Ranking v2)
+Multi-Target Discovery Engine for MikHerb-AI (Evidence Integrity v9.1)
 
 Discovers, ranks, and assesses validated herbicide target proteins across 10 major families:
     ALS / AHAS    – Acetohydroxyacid synthase
@@ -22,6 +22,9 @@ Key scientific integrity enhancements:
     4. Explicit separation of target_evidence_score (empirical evidence strength)
        and target_opportunity_score (actionable discovery potential).
     5. Zero score fabrication when evidence is absent (preserved as None).
+    6. Strict exact gene alias matching — unregistered prefix/suffix tokens are rejected.
+    7. Independent gene_verified and function_verified gates; neither can substitute for the other.
+    8. Exact organism verification via taxonomy ID and normalized scientific name.
 """
 
 import math

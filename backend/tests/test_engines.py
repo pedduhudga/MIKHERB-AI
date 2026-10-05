@@ -433,7 +433,7 @@ def test_target_discovery_provenance_records_present():
         "genes": [{"geneName": {"value": "ALS"}}],
         "proteinDescription": {"recommendedName": {"fullName": {"value": "Acetolactate synthase"}}}
     }
-    with patch("requests.get", return_value=mock_resp), \
+    with patch("app.engines.target_discovery_engine.requests.get", return_value=mock_resp), \
          patch("app.engines.target_discovery_engine._check_alphafold_available", return_value=(True, 94.0)), \
          patch("app.engines.target_discovery_engine._fetch_fasta_seq", return_value="MAATVSFGKL"):
 
@@ -461,7 +461,7 @@ def test_target_discovery_uniprot_accession_verification_invalid():
         "genes": [{"geneName": {"value": "ALS"}}],
         "proteinDescription": {"recommendedName": {"fullName": {"value": "Acetolactate synthase"}}}
     }
-    with patch("requests.get", return_value=mock_resp):
+    with patch("app.engines.target_discovery_engine.requests.get", return_value=mock_resp):
         v_res = _verify_uniprot_accession("P17597", "ALS", "Zea mays")
         assert v_res["status"] == "INVALID"
         assert v_res["provenance_status"] == "INVALID"
@@ -481,7 +481,7 @@ def test_target_discovery_uniprot_accession_verification_gene_mismatch():
         "genes": [{"geneName": {"value": "HPPD"}}],
         "proteinDescription": {"recommendedName": {"fullName": {"value": "Acetolactate synthase"}}}
     }
-    with patch("requests.get", return_value=mock_resp):
+    with patch("app.engines.target_discovery_engine.requests.get", return_value=mock_resp):
         v_res = _verify_uniprot_accession("P93836", "ALS", "Arabidopsis thaliana")
         assert v_res["status"] == "INVALID"
         assert v_res["organism_verified"] is True
@@ -502,7 +502,7 @@ def test_target_discovery_uniprot_accession_verification_function_mismatch():
         "genes": [{"geneName": {"value": "ALS"}}],
         "proteinDescription": {"recommendedName": {"fullName": {"value": "Histone H3"}}}
     }
-    with patch("requests.get", return_value=mock_resp):
+    with patch("app.engines.target_discovery_engine.requests.get", return_value=mock_resp):
         v_res = _verify_uniprot_accession("P17597", "ALS", "Arabidopsis thaliana")
         assert v_res["status"] == "INVALID"
         assert v_res["organism_verified"] is True
@@ -522,7 +522,7 @@ def test_target_discovery_uniprot_species_exact_isolation_palmeri_vs_tuberculatu
         "genes": [{"geneName": {"value": "ALS"}}],
         "proteinDescription": {"recommendedName": {"fullName": {"value": "Acetolactate synthase"}}}
     }
-    with patch("requests.get", return_value=mock_resp):
+    with patch("app.engines.target_discovery_engine.requests.get", return_value=mock_resp):
         v_res = _verify_uniprot_accession("A0A890DLI3", "ALS", "Amaranthus palmeri")
         assert v_res["status"] == "INVALID"
         assert v_res["organism_verified"] is False
@@ -540,7 +540,7 @@ def test_target_discovery_uniprot_verification_empty_gene_fields():
         "genes": [],
         "proteinDescription": {"recommendedName": {"fullName": {"value": "Acetolactate synthase"}}}
     }
-    with patch("requests.get", return_value=mock_resp):
+    with patch("app.engines.target_discovery_engine.requests.get", return_value=mock_resp):
         v_res = _verify_uniprot_accession("P17597", "ALS", "Arabidopsis thaliana")
         assert v_res["status"] == "INVALID"
         assert v_res["gene_verified"] is False
@@ -558,7 +558,7 @@ def test_target_discovery_uniprot_verification_empty_function_fields():
         "genes": [{"geneName": {"value": "ALS"}}],
         "proteinDescription": {}
     }
-    with patch("requests.get", return_value=mock_resp):
+    with patch("app.engines.target_discovery_engine.requests.get", return_value=mock_resp):
         v_res = _verify_uniprot_accession("P17597", "ALS", "Arabidopsis thaliana")
         assert v_res["status"] == "INVALID"
         assert v_res["function_verified"] is False
@@ -576,7 +576,7 @@ def test_target_discovery_uniprot_verification_all_correct_verified():
         "genes": [{"geneName": {"value": "ALS"}, "synonyms": [{"value": "AHAS"}]}],
         "proteinDescription": {"recommendedName": {"fullName": {"value": "Acetolactate synthase, chloroplastic"}}}
     }
-    with patch("requests.get", return_value=mock_resp):
+    with patch("app.engines.target_discovery_engine.requests.get", return_value=mock_resp):
         v_res = _verify_uniprot_accession("P17597", "ALS", "Arabidopsis thaliana")
         assert v_res["status"] == "VERIFIED"
         assert v_res["provenance_status"] == "VERIFIED"
@@ -745,7 +745,7 @@ def test_target_discovery_gene_alias_strict_exact_matching():
         "genes": [{"geneName": {"value": "alstemp"}}],
         "proteinDescription": {"recommendedName": {"fullName": {"value": "Acetolactate synthase, chloroplastic"}}}
     }
-    with patch("requests.get", return_value=mock_resp_bad):
+    with patch("app.engines.target_discovery_engine.requests.get", return_value=mock_resp_bad):
         res = _verify_uniprot_accession("P17597", "ALS", "Arabidopsis thaliana")
         assert res["status"] == "INVALID"
         assert res["gene_verified"] is False
@@ -760,7 +760,7 @@ def test_target_discovery_gene_alias_strict_exact_matching():
         "genes": [{"geneName": {"value": "CSR1"}}],
         "proteinDescription": {"recommendedName": {"fullName": {"value": "Acetolactate synthase, chloroplastic"}}}
     }
-    with patch("requests.get", return_value=mock_resp_good):
+    with patch("app.engines.target_discovery_engine.requests.get", return_value=mock_resp_good):
         res_good = _verify_uniprot_accession("P17597", "ALS", "Arabidopsis thaliana")
         assert res_good["status"] == "VERIFIED"
         assert res_good["gene_verified"] is True
