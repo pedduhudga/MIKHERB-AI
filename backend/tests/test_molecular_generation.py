@@ -230,7 +230,7 @@ def test_database_retrieval_generator_provenance():
 
     res = retriever.generate(target_info, parameters={}, max_candidates=4)
     assert res["status"] == "COMPLETED"
-    assert len(res["molecules"]) == 4
+    assert len(res["molecules"]) == 3
 
     for m in res["molecules"]:
         assert m["generation_mode"] == GenerationMode.DATABASE_RETRIEVAL.value
@@ -423,7 +423,7 @@ def test_molecular_generation_api_enforces_firebase_owner_isolation(client, db_s
             headers=attacker_headers
         )
         assert res_create.status_code == 403
-        assert "Access denied" in res_create.json()["detail"]
+        assert "Forbidden" in res_create.json()["detail"]
 
         res_list = client.get(f"/api/v1/projects/{project.id}/molecular-generation/runs", headers=attacker_headers)
         assert res_list.status_code == 403

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import type { Project, TargetProtein, MolecularGenerationRun, GeneratedMolecule } from '../types';
 import { api } from '../services/api';
-import { Sparkles, Play, ShieldAlert, CheckCircle2, XCircle, AlertCircle, RefreshCw, Copy, Check } from 'lucide-react';
+import { Sparkles, Play, CheckCircle2, AlertCircle, RefreshCw, Copy, Check } from 'lucide-react';
 
 interface Props {
   project: Project;

@@ -215,7 +215,7 @@ class GeneratedMoleculeResponse(BaseModel):
     parent_molecule_smiles: Optional[str] = None
     passed_all_filters: bool
     structural_alerts_count: int
-    structural_alerts_json: Optional[Dict[str, Any]] = None
+    structural_alerts_json: Optional[Any] = None
     max_tanimoto_similarity: Optional[float] = None
     novelty_category: Optional[str] = None
     closest_known_compound: Optional[str] = None
