@@ -67,7 +67,7 @@ class MolecularGenerationManager:
         if not gene or not family:
             return False, "TARGET_VALIDATION_GATE_ERROR: Target failed at stage [TARGET_DISCOVERED]. Both gene identifier and target_family must be specified.", None
 
-        # Stage 2: TARGET_IDENTITY_VERIFIED
+        # Stage 2: TARGET_IDENTITY_VERIFIED (Strict affirmative True requirement; None or False is rejected)
         target_id = target_info.get("id") or target_info.get("target_id") or target_info.get("weed_uniprot_id") or target_info.get("uniprot_id")
         target_ident_ver = target_info.get("target_identity_verified")
         prov_dict = target_info.get("weed_accession_provenance") or target_info.get("provenance") or {}
@@ -77,6 +77,9 @@ class MolecularGenerationManager:
         if not target_id:
             return False, "TARGET_VALIDATION_GATE_ERROR: Target failed at stage [TARGET_IDENTITY_VERIFIED]. Target ID or UniProt accession identifier must be resolved.", None
 
+        if target_ident_ver is not True:
+            return False, "TARGET_VALIDATION_GATE_ERROR: Target failed at stage [TARGET_IDENTITY_VERIFIED]. Target identity verification must be explicitly confirmed (True).", None
+
         # Stage 3: GENE_VERIFIED (Strict affirmative True requirement; None or False is rejected)
         gene_verified = target_info.get("gene_verified")
         if gene_verified is None and isinstance(prov_dict, dict):
@@ -84,18 +87,27 @@ class MolecularGenerationManager:
         if gene_verified is not True:
             return False, "TARGET_VALIDATION_GATE_ERROR: Target failed at stage [GENE_VERIFIED]. Target gene verification must be explicitly confirmed (True).", None
 
-        # Stage 4: FUNCTION_VERIFIED (Strict affirmative True requirement; None or False is rejected)
+        # Stage 4: FUNCTION_VERIFIED (Strict affirmative True requirement AND essentiality evidence required; neither can substitute for the other)
         function_verified = target_info.get("function_verified")
         if function_verified is None and isinstance(prov_dict, dict):
             function_verified = prov_dict.get("function_verified")
         essentiality = target_info.get("essentiality_evidence") or target_info.get("essentiality_status")
-        if function_verified is not True and not essentiality:
-            return False, "TARGET_VALIDATION_GATE_ERROR: Target failed at stage [FUNCTION_VERIFIED]. Biological target function must be confirmed (True) and essentiality evidence provided.", None
+        if function_verified is not True:
+            return False, "TARGET_VALIDATION_GATE_ERROR: Target failed at stage [FUNCTION_VERIFIED]. Biological target function must be explicitly confirmed (True).", None
+        if not essentiality or str(essentiality).strip().lower() in ["none", "unknown", "n/a", ""]:
+            return False, "TARGET_VALIDATION_GATE_ERROR: Target failed at stage [FUNCTION_VERIFIED]. Documented essentiality evidence is required.", None
 
-        # Stage 5: WEED_SPECIES_VERIFIED
+        # Stage 5: WEED_SPECIES_VERIFIED (Strict affirmative True requirement; weed species must be verified)
         weed_species = target_info.get("weed_species") or target_info.get("organism")
+        organism_verified = target_info.get("organism_verified")
+        if organism_verified is None and isinstance(prov_dict, dict):
+            organism_verified = prov_dict.get("organism_verified")
+
         if not weed_species or str(weed_species).strip().lower() in ["unknown", "none", "n/a", ""]:
             return False, "TARGET_VALIDATION_GATE_ERROR: Target failed at stage [WEED_SPECIES_VERIFIED]. Valid botanical weed species (e.g. Amaranthus palmeri) is required.", None
+
+        if organism_verified is not True:
+            return False, "TARGET_VALIDATION_GATE_ERROR: Target failed at stage [WEED_SPECIES_VERIFIED]. Weed organism identity verification must be explicitly confirmed (True).", None
 
         # Stage 6: PROTEIN_VALIDATED
         sequence = target_info.get("weed_sequence") or target_info.get("sequence")
@@ -103,7 +115,7 @@ class MolecularGenerationManager:
             return False, "TARGET_VALIDATION_GATE_ERROR: Target failed at stage [PROTEIN_VALIDATED]. Verified full biological protein sequence (minimum 20 amino acids) required.", None
 
         # Stage 7: STRUCTURE_POCKET_VALIDATED
-        # Require valid 3D binding pocket coordinates, non-failed status, and reject placeholder/failed states
+        # Require valid 3D binding pocket coordinates, non-failed status, and reject placeholder/failed/heuristic states
         pockets = target_info.get("pockets_json") or target_info.get("pockets") or []
         pocket_center = target_info.get("pocket_center")
         first_pocket = pockets[0] if (isinstance(pockets, list) and len(pockets) > 0 and isinstance(pockets[0], dict)) else {}
@@ -112,12 +124,18 @@ class MolecularGenerationManager:
             pocket_center = first_pocket.get("center")
 
         pocket_pred_status = target_info.get("pocket_prediction_status") or first_pocket.get("status")
-        if str(pocket_pred_status).upper() in ["FAILED_EXECUTION", "FAILED_OUTPUT_PARSE", "NO_STRUCTURE", "NO_POCKETS"]:
+        if str(pocket_pred_status).upper() in ["FAILED_EXECUTION", "FAILED_OUTPUT_PARSE", "NO_STRUCTURE", "NO_POCKETS", "HEURISTIC_ONLY", "NOT_INSTALLED", "FAILED"]:
             return False, f"TARGET_VALIDATION_GATE_ERROR: Target failed at stage [STRUCTURE_POCKET_VALIDATED]. Pocket prediction failed with status [{pocket_pred_status}].", None
 
         struct_status = target_info.get("structure_status")
-        if str(struct_status).upper() in ["STRUCTURE_UNAVAILABLE", "FAILED", "NOT_FOUND"]:
+        if str(struct_status).upper() in ["STRUCTURE_UNAVAILABLE", "FAILED", "NOT_FOUND", "HEURISTIC_ONLY", "FAILED_EXECUTION"]:
             return False, f"TARGET_VALIDATION_GATE_ERROR: Target failed at stage [STRUCTURE_POCKET_VALIDATED]. 3D structure is unavailable [{struct_status}].", None
+
+        pocket_score = target_info.get("pocket_score") or first_pocket.get("score")
+        pocket_source = target_info.get("pocket_source") or first_pocket.get("source") or target_info.get("pocket_prediction_source")
+        # Require verified pocket score and reject purely unvalidated surrogate geometry
+        if pocket_score is None and first_pocket:
+            pocket_score = first_pocket.get("p2rank_score")
 
         if not pocket_center or not isinstance(pocket_center, (list, tuple)) or len(pocket_center) != 3:
             return False, "TARGET_VALIDATION_GATE_ERROR: Target failed at stage [STRUCTURE_POCKET_VALIDATED]. Target must have verified 3D binding pocket coordinates with center [x, y, z].", None

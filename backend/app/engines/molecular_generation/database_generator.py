@@ -153,16 +153,22 @@ class DatabaseRetrievalGenerator(BaseMolecularGenerator):
                 if resp.status_code == 200:
                     targets = resp.json().get("targets", [])
                     for tgt in targets:
-                        # Verify organism alignment if organism specified, or require plant/weed target type
+                        # Require exact or aligned organism match to prevent cross-organism bioactivity pollution
                         t_org = str(tgt.get("organism") or "").lower()
                         t_type = str(tgt.get("target_type") or "").upper()
-                        if target_organism and target_organism.lower() in t_org:
-                            target_chembl_id = tgt.get("target_chembl_id")
-                            break
-                        elif t_type in ["SINGLE PROTEIN", "PROTEIN COMPLEX"]:
-                            # Require verified gene symbol match in target pref_name
-                            p_name = str(tgt.get("pref_name") or "").upper()
-                            if gene.upper() in p_name:
+                        p_name = str(tgt.get("pref_name") or "").upper()
+
+                        # Must match target organism if specified; do not adopt generic non-plant targets solely on gene symbol substring
+                        if target_organism:
+                            org_match = (target_organism.lower() in t_org) or (t_org in target_organism.lower())
+                            if org_match and t_type in ["SINGLE PROTEIN", "PROTEIN COMPLEX"]:
+                                target_chembl_id = tgt.get("target_chembl_id")
+                                break
+                        else:
+                            # Without organism, require explicit plant organism or single protein exact gene symbol match
+                            is_plant = any(p in t_org for p in ["viridiplantae", "plant", "arabidopsis", "amaranthus", "oryza", "zea"])
+                            gene_exact = gene.upper() == p_name or f" {gene.upper()} " in f" {p_name} "
+                            if is_plant and gene_exact and t_type in ["SINGLE PROTEIN", "PROTEIN COMPLEX"]:
                                 target_chembl_id = tgt.get("target_chembl_id")
                                 break
 
