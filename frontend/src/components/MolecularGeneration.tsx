@@ -148,11 +148,11 @@ export const MolecularGeneration: React.FC<Props> = ({ project, targets }) => {
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1">Requested Count (Max 200)</label>
+            <label className="block text-xs font-medium text-slate-400 mb-1">Requested Count (Max 500)</label>
             <input
               type="number"
               min={1}
-              max={200}
+              max={500}
               value={requestedCount}
               onChange={(e) => setRequestedCount(Number(e.target.value))}
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white"
@@ -327,7 +327,7 @@ export const MolecularGeneration: React.FC<Props> = ({ project, targets }) => {
                         </span>
                       ) : (
                         <span className="text-emerald-400 flex items-center gap-1 text-[10px]">
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Clean
+                          <CheckCircle2 className="w-3.5 h-3.5" /> No structural alerts detected
                         </span>
                       )}
                     </td>

@@ -1,7 +1,11 @@
+import logging
+import requests
 from typing import Dict, Any, List, Optional, Tuple
 from rdkit import Chem, DataStructs
-from rdkit.Chem import AllChem
+from rdkit.Chem import AllChem, inchi
 from app.engines.molecular_generation.schemas import NoveltyCategory, NoveltyAnalysisResult
+
+logger = logging.getLogger(__name__)
 
 # Curated reference catalogue of commercial and benchmark herbicides across 10 mode-of-action families
 KNOWN_HERBICIDE_REFERENCES = [
@@ -48,17 +52,23 @@ KNOWN_HERBICIDE_REFERENCES = [
 
 class NoveltyAnalyzer:
     """
-    Evaluates candidate molecular novelty using Morgan fingerprints and Tanimoto similarity
-    against known commercial herbicides and optional project-specific reference sets.
+    Evaluates candidate molecular novelty across multi-database scope:
+    1. MIKHERB_REFERENCE_CATALOGUE (Commercial herbicide references)
+    2. PUBCHEM (Live InChIKey query via PubChem PUG REST)
+    3. CHEMBL (Live InChIKey query via ChEMBL REST)
+    4. INTERNAL_PROJECT_DATABASE (Project internal candidate library)
     """
 
-    def __init__(self, additional_references: Optional[List[Dict[str, Any]]] = None):
+    def __init__(self, internal_candidates: Optional[List[Dict[str, Any]]] = None):
         self.reference_pool: List[Tuple[str, str, Any]] = []  # (name, smiles, fp)
-        self._initialize_references(additional_references or [])
+        self.internal_inchikeys: set = set()
+        self.internal_smiles: set = set()
+        self._initialize_references()
+        if internal_candidates:
+            self._initialize_internal(internal_candidates)
 
-    def _initialize_references(self, additional_references: List[Dict[str, Any]]):
-        combined = list(KNOWN_HERBICIDE_REFERENCES) + additional_references
-        for ref in combined:
+    def _initialize_references(self):
+        for ref in KNOWN_HERBICIDE_REFERENCES:
             smiles = ref.get("smiles")
             if not smiles:
                 continue
@@ -68,24 +78,88 @@ class NoveltyAnalyzer:
                 fp = AllChem.GetMorganFingerprintAsBitVect(mol, radius=2, nBits=2048)
                 self.reference_pool.append((ref.get("name", "Unknown Reference"), canonical, fp))
 
+    def _initialize_internal(self, candidates: List[Dict[str, Any]]):
+        for c in candidates:
+            smi = c.get("canonical_smiles") or c.get("smiles")
+            if smi:
+                self.internal_smiles.add(smi)
+            ik = c.get("inchikey")
+            if ik:
+                self.internal_inchikeys.add(ik)
+
+    def _check_pubchem_exact(self, inchikey_str: str, timeout: int = 3) -> Dict[str, Any]:
+        """Queries PubChem PUG REST API for exact InChIKey match."""
+        url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/inchikey/{inchikey_str}/cids/JSON"
+        try:
+            resp = requests.get(url, timeout=timeout)
+            if resp.status_code == 200:
+                data = resp.json()
+                cids = data.get("IdentifierList", {}).get("CID", [])
+                if cids:
+                    return {
+                        "status": "CHECKED",
+                        "exact_match": True,
+                        "matched_cids": [str(c) for c in cids[:3]],
+                        "endpoint": url
+                    }
+                return {"status": "CHECKED", "exact_match": False, "endpoint": url}
+            elif resp.status_code == 404:
+                return {"status": "CHECKED", "exact_match": False, "endpoint": url}
+            else:
+                return {"status": f"HTTP_{resp.status_code}", "exact_match": False, "endpoint": url}
+        except Exception as e:
+            return {"status": "UNREACHABLE_OFFLINE", "exact_match": False, "error": str(e), "endpoint": url}
+
+    def _check_chembl_exact(self, inchikey_str: str, timeout: int = 3) -> Dict[str, Any]:
+        """Queries ChEMBL REST API for exact InChIKey match."""
+        url = f"https://www.ebi.ac.uk/chembl/api/data/molecule.json?molecule_structures__standard_inchi_key={inchikey_str}"
+        try:
+            resp = requests.get(url, timeout=timeout)
+            if resp.status_code == 200:
+                data = resp.json()
+                molecules = data.get("molecules", [])
+                if molecules:
+                    c_id = molecules[0].get("molecule_chembl_id")
+                    return {
+                        "status": "CHECKED",
+                        "exact_match": True,
+                        "chembl_id": c_id,
+                        "endpoint": url
+                    }
+                return {"status": "CHECKED", "exact_match": False, "endpoint": url}
+            return {"status": f"HTTP_{resp.status_code}", "exact_match": False, "endpoint": url}
+        except Exception as e:
+            return {"status": "UNREACHABLE_OFFLINE", "exact_match": False, "error": str(e), "endpoint": url}
+
     def evaluate_novelty(
         self,
         query_mol: Chem.Mol,
         query_canonical_smiles: str,
-        database_scope: str = "MIKHERB Known Commercial Herbicides Catalogue"
+        database_scope: Optional[List[str]] = None,
+        query_external_apis: bool = True
     ) -> NoveltyAnalysisResult:
         """
-        Calculates maximum Tanimoto similarity against the reference database and categorizes novelty.
+        Calculates maximum Tanimoto similarity against the reference catalogue,
+        and dynamically queries PubChem and ChEMBL for true exact-match novelty.
         """
+        databases_checked: Dict[str, Any] = {}
+        active_scope = database_scope or [
+            "MIKHERB_REFERENCE_CATALOGUE",
+            "PUBCHEM",
+            "CHEMBL",
+            "INTERNAL_PROJECT_DATABASE"
+        ]
+
         query_fp = AllChem.GetMorganFingerprintAsBitVect(query_mol, radius=2, nBits=2048)
 
+        # 1. Internal Reference Catalogue Fingerprint Search
         max_sim = 0.0
         closest_name = None
-        exact_match = False
+        exact_match_ref = False
 
         for name, ref_canonical, ref_fp in self.reference_pool:
             if query_canonical_smiles == ref_canonical:
-                exact_match = True
+                exact_match_ref = True
                 max_sim = 1.0
                 closest_name = name
                 break
@@ -96,9 +170,63 @@ class NoveltyAnalyzer:
                 closest_name = name
 
         max_sim_rounded = round(float(max_sim), 4)
+        databases_checked["MIKHERB_REFERENCE_CATALOGUE"] = {
+            "status": "CHECKED",
+            "exact_match": exact_match_ref,
+            "max_tanimoto_similarity": max_sim_rounded,
+            "closest_reference": closest_name
+        }
 
-        if exact_match or max_sim_rounded >= 0.999:
+        # 2. InChIKey Generation
+        try:
+            query_inchikey = inchi.MolToInchiKey(query_mol)
+        except Exception:
+            query_inchikey = None
+
+        # 3. Dynamic External Queries (PubChem & ChEMBL)
+        exact_match_pubchem = False
+        exact_match_chembl = False
+
+        if query_external_apis and query_inchikey:
+            if "PUBCHEM" in active_scope:
+                res_pubchem = self._check_pubchem_exact(query_inchikey, timeout=2)
+                databases_checked["PUBCHEM"] = res_pubchem
+                if res_pubchem.get("exact_match"):
+                    exact_match_pubchem = True
+                    if not closest_name:
+                        closest_name = f"PubChem CID {res_pubchem.get('matched_cids', [''])[0]}"
+
+            if "CHEMBL" in active_scope:
+                res_chembl = self._check_chembl_exact(query_inchikey, timeout=2)
+                databases_checked["CHEMBL"] = res_chembl
+                if res_chembl.get("exact_match"):
+                    exact_match_chembl = True
+                    if not closest_name:
+                        closest_name = f"ChEMBL {res_chembl.get('chembl_id')}"
+        else:
+            if "PUBCHEM" in active_scope:
+                databases_checked["PUBCHEM"] = {"status": "SKIPPED_CONFIG", "exact_match": False}
+            if "CHEMBL" in active_scope:
+                databases_checked["CHEMBL"] = {"status": "SKIPPED_CONFIG", "exact_match": False}
+
+        # 4. Internal Project Database Search
+        exact_match_internal = False
+        if "INTERNAL_PROJECT_DATABASE" in active_scope:
+            if query_canonical_smiles in self.internal_smiles or (query_inchikey and query_inchikey in self.internal_inchikeys):
+                exact_match_internal = True
+            databases_checked["INTERNAL_PROJECT_DATABASE"] = {
+                "status": "CHECKED",
+                "exact_match": exact_match_internal,
+                "known_internal_records_checked": len(self.internal_smiles)
+            }
+
+        # 5. Composite Novelty Categorization
+        any_exact_match = exact_match_ref or exact_match_pubchem or exact_match_chembl or exact_match_internal
+
+        if any_exact_match or max_sim_rounded >= 0.999:
             category = NoveltyCategory.KNOWN_EXACT_MATCH
+            if max_sim_rounded < 1.0 and any_exact_match:
+                max_sim_rounded = 1.0
         elif max_sim_rounded >= 0.85:
             category = NoveltyCategory.HIGH_SIMILARITY
         elif max_sim_rounded >= 0.60:
@@ -108,11 +236,15 @@ class NoveltyAnalyzer:
         else:
             category = NoveltyCategory.NO_MATCH_IN_SEARCHED_DATABASE
 
+        scope_summary_str = ", ".join(active_scope)
+
         return NoveltyAnalysisResult(
-            exact_match=exact_match,
+            exact_match=any_exact_match,
             max_tanimoto_similarity=max_sim_rounded,
             closest_known_compound=closest_name,
             novelty_category=category,
-            reference_database=database_scope,
+            reference_database=scope_summary_str,
+            database_scope=active_scope,
+            databases_checked=databases_checked,
             fingerprint_type="Morgan-Radius-2-2048bit"
         )

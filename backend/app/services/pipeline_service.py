@@ -3,7 +3,13 @@ import os
 import traceback
 from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
-from app.models.models import Project, PipelineStage, TargetProtein, ChemicalLibrary, Compound, Candidate, GeneratedMolecule
+from app.models.models import (
+    Project, PipelineStage, TargetProtein, ChemicalLibrary, Compound, Candidate,
+    GeneratedMolecule, MolecularGenerationRun, MoleculeFilterResult, MoleculeNoveltyResult, MoleculeProvenance
+)
+from app.engines.molecular_generation import (
+    MolecularGenerationManager, GenerationMode, MolecularFilterConfig
+)
 from app.engines.protein_engine import ProteinEngine, P2RankPocketPredictor
 from app.engines.chemical_engine import ChemicalEngine
 from app.engines.docking_engine import AIDockingEngine
@@ -372,9 +378,146 @@ class DiscoveryPipelineRunner:
             }
 
         # ---------------------------------------------------------------
-        # STAGE 3 — Chemical Library Acquisition & RDKit Cleaning
+        # STAGE 3 — Target-Conditioned Molecular Generation & Library Assembly
         # ---------------------------------------------------------------
         elif order == 3:
+            # 1. Retrieve validated biological target with structure & pocket
+            primary_target = self.db.query(TargetProtein).filter_by(project_id=project.id, is_primary_selected=True).first()
+            if not primary_target:
+                primary_target = self.db.query(TargetProtein).filter_by(project_id=project.id).first()
+
+            auto_gen_count = 0
+            if primary_target and primary_target.weed_sequence and primary_target.pockets_json:
+                p_center = None
+                if isinstance(primary_target.pockets_json, list) and len(primary_target.pockets_json) > 0:
+                    p_center = primary_target.pockets_json[0].get("center")
+
+                if p_center and len(p_center) == 3:
+                    existing_run = self.db.query(MolecularGenerationRun).filter_by(
+                        project_id=project.id,
+                        target_id=primary_target.id
+                    ).first()
+
+                    if not existing_run:
+                        mgr = MolecularGenerationManager()
+                        target_dict = {
+                            "id": primary_target.id,
+                            "target_id": primary_target.id,
+                            "gene": primary_target.gene or primary_target.name,
+                            "target_family": primary_target.target_family or "ALS",
+                            "weed_sequence": primary_target.weed_sequence,
+                            "sequence": primary_target.weed_sequence,
+                            "pockets_json": primary_target.pockets_json,
+                            "pocket_center": p_center
+                        }
+
+                        gen_run = MolecularGenerationRun(
+                            project_id=project.id,
+                            target_id=primary_target.id,
+                            run_name=f"Pipeline Target-Conditioned Generation ({primary_target.gene})",
+                            generation_mode="RDKit_ENUMERATION",
+                            generator_name="RDKit Chemical Enumerator",
+                            generator_version="1.0.0",
+                            status="RUNNING",
+                            random_seed=42,
+                            requested_count=15
+                        )
+                        self.db.add(gen_run)
+                        self.db.commit()
+                        self.db.refresh(gen_run)
+
+                        exec_res = mgr.execute_generation_run(
+                            target_info=target_dict,
+                            generation_mode=GenerationMode.RDKit_ENUMERATION,
+                            requested_count=15,
+                            random_seed=42
+                        )
+
+                        gen_run.status = exec_res.get("status", "COMPLETED")
+                        gen_run.generated_count = exec_res.get("generated_count", 0)
+                        gen_run.valid_count = exec_res.get("valid_count", 0)
+                        gen_run.rejected_count = exec_res.get("rejected_count", 0)
+                        gen_run.unique_count = exec_res.get("unique_count", 0)
+                        gen_run.novel_count = exec_res.get("novel_count", 0)
+                        gen_run.completed_at = datetime.datetime.utcnow()
+
+                        for mol_data in exec_res.get("molecules", []):
+                            props = mol_data.get("properties") or {}
+                            alerts = mol_data.get("structural_alerts") or {}
+                            novelty = mol_data.get("novelty") or {}
+                            prov = mol_data.get("provenance") or {}
+
+                            db_mol = GeneratedMolecule(
+                                run_id=gen_run.id,
+                                project_id=project.id,
+                                target_id=primary_target.id,
+                                compound_code=mol_data.get("compound_code", f"MH-GEN-{primary_target.gene}"),
+                                smiles=mol_data.get("smiles", ""),
+                                canonical_smiles=mol_data.get("canonical_smiles"),
+                                inchi=mol_data.get("inchi"),
+                                inchikey=mol_data.get("inchikey"),
+                                molecular_formula=props.get("molecular_formula"),
+                                mw=props.get("molecular_weight"),
+                                logp=props.get("logp"),
+                                hbd=props.get("hbd"),
+                                hba=props.get("hba"),
+                                tpsa=props.get("tpsa"),
+                                rotatable_bonds=props.get("rotatable_bonds"),
+                                formal_charge=props.get("formal_charge"),
+                                heavy_atom_count=props.get("heavy_atom_count"),
+                                ring_count=props.get("ring_count"),
+                                chemical_validation_status=mol_data.get("chemical_validation_status", "VALID"),
+                                rejection_reason=mol_data.get("rejection_reason"),
+                                generation_mode=gen_run.generation_mode,
+                                parent_molecule_smiles=prov.get("parent_molecule"),
+                                parent_candidate_id=prov.get("parent_candidate_id"),
+                                passed_all_filters=mol_data.get("passed_all_filters", False),
+                                structural_alerts_count=alerts.get("alerts_count", 0),
+                                structural_alerts_json=alerts.get("alerts_detected", []),
+                                max_tanimoto_similarity=novelty.get("max_tanimoto_similarity"),
+                                novelty_category=novelty.get("novelty_category"),
+                                closest_known_compound=novelty.get("closest_known_compound")
+                            )
+                            self.db.add(db_mol)
+                            self.db.commit()
+                            self.db.refresh(db_mol)
+
+                            db_filter = MoleculeFilterResult(
+                                molecule_id=db_mol.id,
+                                passed_all_filters=mol_data.get("passed_all_filters", False),
+                                property_results_json=mol_data.get("filter_results"),
+                                structural_alert_screen_passed=alerts.get("passed", True),
+                                structural_alerts_detected_json=alerts.get("alerts_detected", [])
+                            )
+                            self.db.add(db_filter)
+
+                            db_novelty = MoleculeNoveltyResult(
+                                molecule_id=db_mol.id,
+                                exact_match=novelty.get("exact_match", False),
+                                max_tanimoto_similarity=novelty.get("max_tanimoto_similarity"),
+                                closest_known_compound=novelty.get("closest_known_compound"),
+                                novelty_category=novelty.get("novelty_category"),
+                                reference_database=novelty.get("reference_database", "Default")
+                            )
+                            self.db.add(db_novelty)
+
+                            db_prov = MoleculeProvenance(
+                                molecule_id=db_mol.id,
+                                target_id=primary_target.id,
+                                protein_sequence_hash=prov.get("protein_sequence_hash"),
+                                pocket_center_json=p_center,
+                                generation_method=prov.get("generation_method", gen_run.generation_mode),
+                                generator_name=prov.get("generator_name", gen_run.generator_name),
+                                generator_version=prov.get("generator_version", gen_run.generator_version),
+                                parameters_json=prov.get("parameters"),
+                                random_seed=prov.get("random_seed"),
+                                provenance_hash=prov.get("provenance_hash", "UNKNOWN")
+                            )
+                            self.db.add(db_prov)
+
+                        self.db.commit()
+                        auto_gen_count = gen_run.valid_count
+
             real_herbicide_queries = [
                 # ALS / AHAS Inhibitors
                 "Imazethapyr", "Chlorimuron-ethyl", "Sulfometuron-methyl", "Flumetsulam", "Florasulam",

@@ -28,7 +28,11 @@ class GenerationProvenanceTracker:
         parent_molecule: Optional[str] = None,
         parent_candidate_id: Optional[str] = None,
         source_database: Optional[str] = None,
-        source_compound_id: Optional[str] = None
+        source_compound_id: Optional[str] = None,
+        source_url: Optional[str] = None,
+        query_endpoint: Optional[str] = None,
+        response_hash: Optional[str] = None,
+        retrieval_method: Optional[str] = None
     ) -> ProvenanceMetadata:
         created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
         
@@ -50,6 +54,10 @@ class GenerationProvenanceTracker:
             "parent_molecule": parent_molecule,
             "source_database": source_database,
             "source_compound_id": source_compound_id,
+            "source_url": source_url,
+            "query_endpoint": query_endpoint,
+            "response_hash": response_hash,
+            "retrieval_method": retrieval_method,
             "created_at": created_at
         }
 
@@ -68,6 +76,10 @@ class GenerationProvenanceTracker:
             parent_candidate_id=parent_candidate_id,
             source_database=source_database,
             source_compound_id=source_compound_id,
+            source_url=source_url,
+            query_endpoint=query_endpoint,
+            response_hash=response_hash,
+            retrieval_method=retrieval_method,
             random_seed=random_seed,
             parameters=parameters,
             created_at=created_at,

@@ -76,6 +76,13 @@ class NoveltyAnalysisResult(BaseModel):
     closest_known_compound: Optional[str] = None
     novelty_category: NoveltyCategory
     reference_database: str
+    database_scope: List[str] = Field(default_factory=lambda: [
+        "MIKHERB_REFERENCE_CATALOGUE",
+        "PUBCHEM",
+        "CHEMBL",
+        "INTERNAL_PROJECT_DATABASE"
+    ])
+    databases_checked: Dict[str, Any] = Field(default_factory=dict)
     fingerprint_type: str = "Morgan-Radius-2-2048bit"
 
 class ProvenanceMetadata(BaseModel):
@@ -90,6 +97,10 @@ class ProvenanceMetadata(BaseModel):
     parent_candidate_id: Optional[str] = None
     source_database: Optional[str] = None
     source_compound_id: Optional[str] = None
+    source_url: Optional[str] = None
+    query_endpoint: Optional[str] = None
+    response_hash: Optional[str] = None
+    retrieval_method: Optional[str] = None
     random_seed: Optional[int] = None
     parameters: Dict[str, Any] = {}
     created_at: str
@@ -114,7 +125,7 @@ class GenerationRunCreateRequest(BaseModel):
     target_id: int
     generation_mode: GenerationMode
     run_name: Optional[str] = None
-    requested_count: int = Field(default=20, ge=1, le=200, description="Requested candidate count (max 200)")
+    requested_count: int = Field(default=20, ge=1, le=500, description="Requested candidate count (max 500)")
     random_seed: Optional[int] = Field(default=42, description="Random seed for reproducible generation")
     parameters: Dict[str, Any] = Field(default_factory=dict, description="Generator-specific parameters")
     filter_config: Optional[MolecularFilterConfig] = None

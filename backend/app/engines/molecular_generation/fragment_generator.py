@@ -8,30 +8,29 @@ from app.engines.molecular_generation.schemas import GenerationMode
 
 logger = logging.getLogger(__name__)
 
-# Curated herbicide fragments representing essential pharmacophore features
-CORE_HERBICIDE_FRAGMENTS = [
-    # ALS / AHAS fragments
-    "c1nc(OC)cc(C)n1",           # 4-methoxy-6-methylpyrimidin-2-amine fragment
-    "c1ccccc1S(=O)(=O)NC(=O)",  # Benzenesulfonyl isocyanate / carbamate fragment
-    "CC(C)C1(C)N=C(C)NC1=O",     # Imidazolinone heterocyclic fragment
-    "Cc1cc2nc(nc2n1)S(=O)(=O)",  # Triazolopyrimidine sulfonyl fragment
+# Representative commercial herbicide molecules used to seed authentic BRICS synthons
+SEED_HERBICIDE_MOLS = [
+    # ALS inhibitors
+    "CC1=NC(C(C)C)=NC(=O)C1=C2C=CC(=CC2=O)O",                               # Imazethapyr
+    "CCN(C)c1nc(nc(n1)Cl)NS(=O)(=O)c2ccccc2C(=O)OCC",                       # Chlorimuron-ethyl
+    "CC1=NC(=NC(=N1)NC(=O)NS(=O)(=O)C2=CC=CC=C2C(=O)OC)C",                  # Sulfometuron-methyl
+    "Cc1cc(F)cc(c1)n2nc3nc(nc3n2)S(=O)(=O)Nc4c(F)cccc4F",                   # Flumetsulam
+    "COc1cc(OC)nc(n1)Oc2cccc(c2)C(=O)O",                                   # Bispyribac
 
-    # HPPD fragments
-    "O=C1CCCC(=O)C1",            # Cyclohexane-1,3-dione fragment
-    "c1cc(c(cc1)S(=O)(=O)C)",    # Methylsulfonyl phenyl fragment
-    "C1=NOC=C1",                 # Isoxazole fragment
+    # HPPD inhibitors
+    "CS(=O)(=O)c1ccc(c(c1)N(=O)=O)C(=O)C2C(=O)CCCC2=O",                    # Mesotrione
+    "CC1(CC1)C(=O)c2cc(c(cc2C(F)(F)F)S(=O)(=O)C)C3=NOC=C3",               # Isoxaflutole
+    "CS(=O)(=O)c1cc(c(c(c1)OCC(F)(F)F)C(=O)C2C(=O)CCCC2=O)Cl",             # Tembotrione
 
-    # PPO fragments
-    "c1ccc(Oc2ccccc2)cc1",       # Diphenyl ether fragment
-    "c1c(Cl)cc(F)cc1",           # Halogenated phenyl fragment
-    "O=C1CC=CCC1=O",             # Tetrahydrophthalimide dione fragment
+    # PPO inhibitors
+    "CC1=CC(=O)C2=C(C=C1)N(C(=O)O2)C3=CC(=C(C=C3F)Cl)F",                  # Flumioxazin
+    "COc1cc(c(cc1C(=O)NS(=O)(=O)C)Cl)Oc2ccc(cc2Cl)C(F)(F)F",              # Fomesafen
+    "CS(=O)(=O)c1cc(c(cc1Cl)N2N=C(C(=O)N2C(F)F)C)Cl",                     # Sulfentrazone
 
-    # Linker & solubilizing fragments
-    "CC(=O)OCC",                 # Ethyl ester linker
-    "C(=O)NC",                   # Methylamide linker
-    "C(F)(F)F",                  # Trifluoromethyl pharmacophore
-    "c1nccs1",                   # Thiazole heterocycle
-    "c1ncccn1"                   # Pyrimidine heterocycle
+    # ACCase & Photosystem II inhibitors
+    "CCCC(=O)C1C(=O)CC(CC1=NOCC=CCl)CCSC",                                 # Clethodim
+    "CCNc1nc(nc(n1)Cl)NC(C)C",                                             # Atrazine
+    "CC(C)(C)c1nnc(n(c1=O)N)SC",                                           # Metribuzin
 ]
 
 
@@ -39,19 +38,28 @@ class FragmentRecombinationGenerator(BaseMolecularGenerator):
     """
     Legitimate fragment-based molecular generation engine using RDKit BRICS
     (Bioisosteric Rapid Chemical Synthon) fragmentation and recombination.
+    Strictly avoids chemically arbitrary atom-to-atom coupling.
     """
 
-    def __init__(self, version: str = "1.0.0"):
+    def __init__(self, version: str = "2.0.0"):
         super().__init__(name="RDKit Fragment Recombinator", version=version)
-        self._precompiled_frags = self._prepare_fragments()
+        self._precompiled_synthons = self._prepare_synthons()
 
-    def _prepare_fragments(self) -> List[Chem.Mol]:
-        mols = []
-        for s in CORE_HERBICIDE_FRAGMENTS:
-            m = Chem.MolFromSmiles(s)
+    def _prepare_synthons(self) -> List[Chem.Mol]:
+        """Decomposes benchmark herbicide structures into valid BRICS synthons."""
+        synthon_smiles = set()
+        for s in SEED_HERBICIDE_MOLS:
+            mol = Chem.MolFromSmiles(s)
+            if mol:
+                frags = BRICS.BRICSDecompose(mol)
+                synthon_smiles.update(frags)
+
+        synthons = []
+        for f_smi in synthon_smiles:
+            m = Chem.MolFromSmiles(f_smi)
             if m:
-                mols.append(m)
-        return mols
+                synthons.append(m)
+        return synthons
 
     def get_capabilities(self) -> GeneratorCapabilities:
         return GeneratorCapabilities(
@@ -63,7 +71,7 @@ class FragmentRecombinationGenerator(BaseMolecularGenerator):
             supports_substituent_enumeration=False,
             supports_database_retrieval=False,
             deterministic_with_seed=True,
-            description="Recombines chemically compatible fragments and synthon units using BRICS grammar."
+            description="Recombines chemically compatible fragments using authentic BRICS grammar. No arbitrary unguided coupling."
         )
 
     def get_status(self) -> Dict[str, Any]:
@@ -73,7 +81,7 @@ class FragmentRecombinationGenerator(BaseMolecularGenerator):
             "status": "INSTALLED",
             "tier": "SCIENTIFICALLY_VALIDATED",
             "generation_mode": GenerationMode.FRAGMENT_RECOMBINATION.value,
-            "fragment_pool_size": len(self._precompiled_frags)
+            "synthon_pool_size": len(self._precompiled_synthons)
         }
 
     def validate_inputs(self, target_info: Dict[str, Any], parameters: Dict[str, Any]) -> List[str]:
@@ -103,28 +111,36 @@ class FragmentRecombinationGenerator(BaseMolecularGenerator):
 
         # Allow user to provide custom fragment seeds
         custom_frags = parameters.get("fragments", [])
-        active_frags = list(self._precompiled_frags)
+        active_synthons = list(self._precompiled_synthons)
         for s in custom_frags:
             m = Chem.MolFromSmiles(s)
             if m:
-                active_frags.append(m)
+                # Decompose user molecule into BRICS synthons if whole, or add directly
+                decomposed = BRICS.BRICSDecompose(m)
+                for d in decomposed:
+                    dm = Chem.MolFromSmiles(d)
+                    if dm:
+                        active_synthons.append(dm)
 
-        if len(active_frags) < 2:
+        if len(active_synthons) < 2:
             return {
                 "status": "FAILED",
                 "molecules": [],
-                "error": "At least 2 valid fragments required for recombination.",
+                "error": "At least 2 valid BRICS synthons required for recombination.",
                 "generated_count": 0
             }
+
+        # Shuffle active synthons deterministically
+        shuffled_synthons = list(active_synthons)
+        rng.shuffle(shuffled_synthons)
 
         generated_smiles_set = set()
         candidates_raw: List[Dict[str, Any]] = []
 
         try:
-            # Generate BRICS fragment network
-            brics_gen = BRICS.BRICSBuild(active_frags)
-            # Recombination builder iterator
-            for prod_mol in brics_gen:
+            # Generate BRICS recombinant molecules iterator
+            brics_builder = BRICS.BRICSBuild(shuffled_synthons)
+            for prod_mol in brics_builder:
                 if len(candidates_raw) >= max_candidates:
                     break
 
@@ -135,8 +151,9 @@ class FragmentRecombinationGenerator(BaseMolecularGenerator):
                     if canonical in generated_smiles_set:
                         continue
 
-                    # Filter out tiny or excessively large unguided polymers
-                    if prod_mol.GetNumHeavyAtoms() < 10 or prod_mol.GetNumHeavyAtoms() > 45:
+                    # Filter out tiny fragments or excessively huge unguided polymers
+                    heavy_atoms = prod_mol.GetNumHeavyAtoms()
+                    if heavy_atoms < 10 or heavy_atoms > 45:
                         continue
 
                     generated_smiles_set.add(canonical)
@@ -145,43 +162,15 @@ class FragmentRecombinationGenerator(BaseMolecularGenerator):
                         "generation_mode": GenerationMode.FRAGMENT_RECOMBINATION.value,
                         "generator_name": self.name,
                         "generator_version": self.version,
-                        "recombination_method": "RDKit_BRICS_Assembly"
+                        "recombination_method": "RDKit_BRICS_Grammar_Assembly"
                     })
                 except Exception:
                     continue
         except Exception as e:
             logger.warning(f"BRICS build generator encountered exception: {e}")
 
-        # If BRICS combinatorics produced fewer than max_candidates, use synthetic coupling fallback
-        if len(candidates_raw) < max_candidates:
-            attempts = 0
-            while len(candidates_raw) < max_candidates and attempts < max_candidates * 15:
-                attempts += 1
-                f1 = rng.choice(active_frags)
-                f2 = rng.choice(active_frags)
-                if f1 == f2:
-                    continue
-                try:
-                    combined = Chem.CombineMols(f1, f2)
-                    ed_mol = Chem.EditableMol(combined)
-                    # Add a simple single bond between atom 0 of f1 and atom 0 of f2
-                    offset = f1.GetNumAtoms()
-                    ed_mol.AddBond(0, offset, Chem.BondType.SINGLE)
-                    mol_res = ed_mol.GetMol()
-                    Chem.SanitizeMol(mol_res)
-                    canonical = Chem.MolToSmiles(mol_res, canonical=True)
-                    if canonical not in generated_smiles_set:
-                        generated_smiles_set.add(canonical)
-                        candidates_raw.append({
-                            "smiles": canonical,
-                            "generation_mode": GenerationMode.FRAGMENT_RECOMBINATION.value,
-                            "generator_name": self.name,
-                            "generator_version": self.version,
-                            "recombination_method": "Fragment_Direct_Coupling"
-                        })
-                except Exception:
-                    continue
-
+        # Scientific Integrity: If BRICS produced fewer than requested, honestly return
+        # only the validly recombined molecules. NEVER use unguided arbitrary atom-0 coupling.
         return {
             "status": "COMPLETED",
             "molecules": candidates_raw,

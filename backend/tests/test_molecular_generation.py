@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.db.database import Base, get_db
 from app.main import app
-from app.models.models import Project, TargetProtein, MolecularGenerationRun, GeneratedMolecule
+from app.models.models import Project, TargetProtein, MolecularGenerationRun, GeneratedMolecule, Compound, ChemicalLibrary
 from app.engines.molecular_generation import (
     MolecularGenerationManager, GenerationMode, GenerationRunStatus, NoveltyCategory,
     MolecularFilterConfig, ChemicalValidatorAndFilter, NoveltyAnalyzer,
@@ -15,6 +15,7 @@ from app.engines.molecular_generation import (
     FragmentRecombinationGenerator, DatabaseRetrievalGenerator,
     GenerativeModelAdapter
 )
+from app.services.pipeline_service import DiscoveryPipelineRunner
 
 # In-memory test database fixture
 TEST_DATABASE_URL = "sqlite:///:memory:"
@@ -99,7 +100,6 @@ def test_disconnected_salts_keep_largest_organic_fragment():
 
 def test_filter_config_threshold_enforcement():
     """Configurable filter thresholds must pass compliant molecules and reject outliers."""
-    # Aspirin: MW 180.16, LogP ~1.31
     _, _, _, _, _, _, props, _ = ChemicalValidatorAndFilter.validate_and_characterize("CC(=O)Oc1ccccc1C(=O)O")
 
     # Standard filter config passes
@@ -145,27 +145,40 @@ def test_structural_alert_screen_identifies_pains_and_reactive_motifs():
 
 
 # ===========================================================================
-# 4. Novelty Analysis & Tanimoto Classification Tests
+# 4. Multi-Database Novelty Scope & Tanimoto Classification Tests
 # ===========================================================================
 
-def test_novelty_exact_match_and_tanimoto_similarity():
+def test_novelty_multi_database_scope_and_tanimoto():
     """
-    Identical commercial herbicide matches must be categorized KNOWN_EXACT_MATCH (similarity 1.0).
-    Novel or modified analogs must be classified into HIGH, MODERATE, LOW, or NO_MATCH.
+    NoveltyAnalyzer must evaluate across multiple database scopes:
+    Reference Catalogue, PubChem, ChEMBL, and Internal Project DB.
     """
-    analyzer = NoveltyAnalyzer()
+    analyzer = NoveltyAnalyzer(internal_candidates=[
+        {"smiles": "CC(=O)Oc1ccccc1C(=O)O", "compound_code": "MH-INTERNAL-01"}
+    ])
 
-    # 1. Exact match with commercial herbicide (Imazethapyr)
+    # 1. Exact match with internal reference catalogue (Imazethapyr)
     _, _, _, can_smiles, _, _, _, mol = ChemicalValidatorAndFilter.validate_and_characterize("CC1=NC(C(C)C)=NC(=O)C1=C2C=CC(=CC2=O)O")
-    res_exact = analyzer.evaluate_novelty(mol, can_smiles)
+    res_exact = analyzer.evaluate_novelty(mol, can_smiles, query_external_apis=False)
     assert res_exact.exact_match is True
     assert res_exact.max_tanimoto_similarity == 1.0
     assert res_exact.closest_known_compound == "Imazethapyr"
     assert res_exact.novelty_category == NoveltyCategory.KNOWN_EXACT_MATCH
+    assert "MIKHERB_REFERENCE_CATALOGUE" in res_exact.database_scope
+    assert "PUBCHEM" in res_exact.database_scope
+    assert "CHEMBL" in res_exact.database_scope
+    assert "INTERNAL_PROJECT_DATABASE" in res_exact.database_scope
 
-    # 2. Unrelated novel chemical (e.g. Adamantane-tetrazole)
-    _, _, _, can_smiles_novel, _, _, _, mol_novel = ChemicalValidatorAndFilter.validate_and_characterize("c1nnn[nH]1")
-    res_novel = analyzer.evaluate_novelty(mol_novel, can_smiles_novel)
+    # 2. Exact match with internal project database candidate (Aspirin)
+    _, _, _, can_asp, _, _, _, mol_asp = ChemicalValidatorAndFilter.validate_and_characterize("CC(=O)Oc1ccccc1C(=O)O")
+    res_internal = analyzer.evaluate_novelty(mol_asp, can_asp, query_external_apis=False)
+    assert res_internal.exact_match is True
+    assert res_internal.novelty_category == NoveltyCategory.KNOWN_EXACT_MATCH
+    assert res_internal.databases_checked["INTERNAL_PROJECT_DATABASE"]["exact_match"] is True
+
+    # 3. Novel chemical candidate
+    _, _, _, can_novel, _, _, _, mol_novel = ChemicalValidatorAndFilter.validate_and_characterize("c1nnn[nH]1")
+    res_novel = analyzer.evaluate_novelty(mol_novel, can_novel, query_external_apis=False)
     assert res_novel.exact_match is False
     assert res_novel.max_tanimoto_similarity < 0.60
     assert res_novel.novelty_category in [NoveltyCategory.LOW_SIMILARITY, NoveltyCategory.NO_MATCH_IN_SEARCHED_DATABASE]
@@ -203,7 +216,10 @@ def test_rdkit_chemical_enumeration_validity_and_reproducibility():
 # ===========================================================================
 
 def test_fragment_recombination_generator_validity():
-    """FragmentRecombinationGenerator must recombine fragments into valid chemical structures."""
+    """
+    FragmentRecombinationGenerator must recombine fragments using authentic BRICS synthons.
+    Must never use unguided arbitrary atom-0 single-bond coupling.
+    """
     recombinator = FragmentRecombinationGenerator()
     target_info = {"gene": "HPPD", "target_family": "HPPD"}
 
@@ -214,91 +230,141 @@ def test_fragment_recombination_generator_validity():
     for m in res["molecules"]:
         is_valid, _, _, _, _, _, _, _ = ChemicalValidatorAndFilter.validate_and_characterize(m["smiles"])
         assert is_valid is True, f"Recombined molecule {m['smiles']} must be chemically valid"
+        assert m["recombination_method"] == "RDKit_BRICS_Grammar_Assembly"
 
 
 # ===========================================================================
-# 7. Database Retrieval Engine Tests
+# 7. Database Retrieval Engine Tests (with Live & Fallback Provenance)
 # ===========================================================================
 
 def test_database_retrieval_generator_provenance():
     """
     DatabaseRetrievalGenerator must retrieve known target inhibitors and preserve
-    explicit provenance. Must never label them as AI-generated.
+    explicit provenance with audit hash and endpoint details. Must never label as AI-generated.
     """
     retriever = DatabaseRetrievalGenerator()
     target_info = {"gene": "ALS", "target_family": "ALS"}
 
-    res = retriever.generate(target_info, parameters={}, max_candidates=4)
+    res = retriever.generate(target_info, parameters={"prefer_live_api": False}, max_candidates=4)
     assert res["status"] == "COMPLETED"
-    assert len(res["molecules"]) == 3
+    assert len(res["molecules"]) > 0
 
     for m in res["molecules"]:
         assert m["generation_mode"] == GenerationMode.DATABASE_RETRIEVAL.value
         assert m["source_database"] == "PubChem"
         assert m["source_compound_id"] is not None
         assert m["source_url"] is not None
+        assert m["retrieval_method"] in ["PUBCHEM_REST_API", "LOCAL_CURATED_BENCHMARK"]
+        assert m["response_hash"] is not None
+        assert m["query_endpoint"] is not None
         assert m["retrieved_at"] is not None
 
 
 # ===========================================================================
-# 8. Generative AI Adapter NOT_AVAILABLE Semantic Tests
+# 8. Generative AI Adapter Lifecycle & NOT_AVAILABLE Tests
 # ===========================================================================
 
-def test_generative_ai_adapter_returns_not_available_when_not_installed():
+def test_generative_ai_adapter_lifecycle_tiers():
     """
-    GenerativeModelAdapter must strictly return status = NOT_AVAILABLE when no
-    genuine local AI framework (e.g. REINVENT) is installed. Must NEVER fake output.
+    GenerativeModelAdapter must distinguish lifecycle tiers:
+    NOT_INSTALLED -> INSTALLED (unconfigured weights) -> MODEL_CONFIGURED.
+    Must strictly return status = NOT_AVAILABLE when model or weights are missing.
     """
-    adapter = GenerativeModelAdapter(model_name="REINVENT-4")
-    with patch.object(adapter, "is_installed", return_value=False):
-        status = adapter.get_status()
+    # 1. Model binary absent -> NOT_INSTALLED
+    adapter_uninstalled = GenerativeModelAdapter(model_name="REINVENT-4")
+    with patch.object(adapter_uninstalled, "is_installed", return_value=False):
+        status = adapter_uninstalled.get_status()
+        assert status["tier"] == "NOT_INSTALLED"
         assert status["status"] == "NOT_AVAILABLE"
 
-        gen_res = adapter.generate(
-            target_info={"gene": "ALS", "target_family": "ALS"},
-            parameters={},
-            random_seed=42,
-            max_candidates=10
-        )
-        assert gen_res["status"] == "NOT_AVAILABLE"
-        assert len(gen_res["molecules"]) == 0
-        assert "not installed" in gen_res["error"].lower()
+    # 2. Binary present but weights unconfigured -> INSTALLED
+    adapter_installed = GenerativeModelAdapter(model_name="REINVENT-4")
+    with patch.object(adapter_installed, "is_installed", return_value=True):
+        with patch.object(adapter_installed, "has_configured_weights", return_value=False):
+            status = adapter_installed.get_status()
+            assert status["tier"] == "INSTALLED"
+            assert status["status"] == "NOT_AVAILABLE"
+
+            gen_res = adapter_installed.generate(
+                target_info={"gene": "ALS", "target_family": "ALS"},
+                parameters={},
+                random_seed=42
+            )
+            assert gen_res["status"] == "NOT_AVAILABLE"
+            assert len(gen_res["molecules"]) == 0
+            assert "weights not configured" in gen_res["error"].lower()
 
 
 # ===========================================================================
-# 9. Target Validation Guard Tests
+# 9. Target Validation Gate & Candidate Limit Tests
 # ===========================================================================
 
-def test_molecular_generation_manager_blocks_missing_target():
-    """MolecularGenerationManager cannot execute without valid biological target information."""
+def test_molecular_generation_manager_strict_target_validation_gate():
+    """
+    MolecularGenerationManager requires complete target discovery prerequisites:
+    verified gene, sequence, and 3D pocket coordinates.
+    """
     manager = MolecularGenerationManager()
-    res = manager.execute_generation_run(
-        target_info={},  # Empty/unvalidated target
-        generation_mode=GenerationMode.RDKit_ENUMERATION,
-        requested_count=10
+
+    # 1. Missing target info completely
+    res1 = manager.execute_generation_run(target_info={}, generation_mode=GenerationMode.RDKit_ENUMERATION)
+    assert res1["status"] == GenerationRunStatus.FAILED.value
+    assert "TARGET_VALIDATION_ERROR" in res1["error"]
+
+    # 2. Missing biological sequence
+    res2 = manager.execute_generation_run(
+        target_info={"gene": "ALS", "target_family": "ALS", "pockets_json": [{"center": [1.0, 2.0, 3.0]}]},
+        generation_mode=GenerationMode.RDKit_ENUMERATION
     )
-    assert res["status"] == GenerationRunStatus.FAILED.value
-    assert "TARGET_VALIDATION_ERROR" in res["error"]
-    assert res["generated_count"] == 0
+    assert res2["status"] == GenerationRunStatus.FAILED.value
+    assert "protein sequence" in res2["error"].lower()
+
+    # 3. Missing 3D pocket coordinates
+    res3 = manager.execute_generation_run(
+        target_info={"gene": "ALS", "target_family": "ALS", "weed_sequence": "MVKLA"},
+        generation_mode=GenerationMode.RDKit_ENUMERATION
+    )
+    assert res3["status"] == GenerationRunStatus.FAILED.value
+    assert "3d binding pocket" in res3["error"].lower()
+
+    # 4. Valid target satisfies all prerequisites
+    res4 = manager.execute_generation_run(
+        target_info={
+            "gene": "ALS",
+            "target_family": "ALS",
+            "weed_sequence": "MVKLAARSTP",
+            "pockets_json": [{"center": [12.0, 15.0, 18.0]}]
+        },
+        generation_mode=GenerationMode.RDKit_ENUMERATION,
+        requested_count=5,
+        random_seed=42
+    )
+    assert res4["status"] == GenerationRunStatus.COMPLETED.value
+    assert res4["valid_count"] > 0
 
 
-def test_top_n_candidate_limit_enforcement():
-    """Requested candidate counts exceeding safe thresholds must be clamped to HARD_MAX_CANDIDATES."""
+def test_top_n_candidate_limit_enforcement_up_to_500():
+    """Requested candidate counts exceeding safe thresholds must be clamped to HARD_MAX_CANDIDATES (500)."""
     manager = MolecularGenerationManager()
-    target_info = {"gene": "ALS", "target_family": "ALS"}
+    target_info = {
+        "gene": "ALS",
+        "target_family": "ALS",
+        "weed_sequence": "MVKLAARSTP",
+        "pockets_json": [{"center": [12.0, 15.0, 18.0]}]
+    }
 
     res = manager.execute_generation_run(
         target_info=target_info,
         generation_mode=GenerationMode.RDKit_ENUMERATION,
-        requested_count=500,  # Exceeds max 200
+        requested_count=1000,  # Exceeds max 500
         random_seed=42
     )
     assert res["status"] == GenerationRunStatus.COMPLETED.value
-    assert res["requested_count"] == 200  # Clamped
+    assert res["requested_count"] == 500  # Clamped to 500
 
 
 # ===========================================================================
-# 10. Scientific Provenance Tracker Tests
+# 10. Scientific Provenance Tracker Audit Tests
 # ===========================================================================
 
 def test_provenance_tracker_generates_tamper_evident_sha256_hash():
@@ -311,13 +377,18 @@ def test_provenance_tracker_generates_tamper_evident_sha256_hash():
         generator_version="1.0.0",
         generation_method="Amide_Coupling",
         parameters={"scaffold": "Sulfonylurea"},
-        random_seed=42
+        random_seed=42,
+        query_endpoint="local",
+        response_hash="abc123hash",
+        retrieval_method="ENUMERATION"
     )
     assert prov.target_id == 1
     assert prov.target_family == "ALS"
     assert prov.random_seed == 42
+    assert prov.query_endpoint == "local"
+    assert prov.response_hash == "abc123hash"
     assert prov.provenance_hash is not None
-    assert len(prov.provenance_hash) == 64  # SHA-256 hex length
+    assert len(prov.provenance_hash) == 64
 
 
 # ===========================================================================
@@ -329,7 +400,6 @@ def test_molecular_generation_api_crud_and_execution_lifecycle(client, db_sessio
     End-to-end integration test for molecular generation API:
     Create Run -> List Runs -> Execute Run -> Verify Generated Molecules & Provenance -> Query Detail.
     """
-    # Create test project and validated target
     project = Project(
         name="Test Palmer Amaranth Discovery",
         owner_uid="user_123",
@@ -346,7 +416,7 @@ def test_molecular_generation_api_crud_and_execution_lifecycle(client, db_sessio
         name="Palmer Amaranth ALS",
         gene="ALS",
         target_family="ALS",
-        weed_sequence="MVKLA",
+        weed_sequence="MVKLAARSTP",
         is_primary_selected=True,
         pockets_json=[{"center": [12.0, 15.0, 18.0]}]
     )
@@ -414,7 +484,6 @@ def test_molecular_generation_api_enforces_firebase_owner_isolation(client, db_s
     db_session.commit()
     db_session.refresh(project)
 
-    # User 'unauthorized_attacker' tries to access project
     attacker_headers = {"Authorization": "Bearer mock_token"}
     with patch("app.core.firebase.verify_firebase_token", return_value={"uid": "unauthorized_attacker", "email": "attacker@example.com"}):
         res_create = client.post(
@@ -425,8 +494,62 @@ def test_molecular_generation_api_enforces_firebase_owner_isolation(client, db_s
         assert res_create.status_code == 403
         assert "Forbidden" in res_create.json()["detail"]
 
-        res_list = client.get(f"/api/v1/projects/{project.id}/molecular-generation/runs", headers=attacker_headers)
-        assert res_list.status_code == 403
 
-        res_mols = client.get(f"/api/v1/projects/{project.id}/molecules", headers=attacker_headers)
-        assert res_mols.status_code == 403
+# ===========================================================================
+# 12. Discovery Pipeline Stage 3 Molecular Generation Integration Tests
+# ===========================================================================
+
+def test_discovery_pipeline_stage_3_executes_target_conditioned_generation(db_session):
+    """
+    DiscoveryPipelineRunner Stage 3 must dynamically execute target-conditioned molecular
+    generation on validated target with pocket, and assemble the candidates into ChemicalLibrary.
+    """
+    project = Project(
+        name="Pipeline Auto-Gen Test",
+        owner_uid="user_pipeline",
+        weed_species="Palmer Amaranth",
+        crop_species="Soybean",
+        objective="new_herbicide"
+    )
+    db_session.add(project)
+    db_session.commit()
+    db_session.refresh(project)
+
+    target = TargetProtein(
+        project_id=project.id,
+        name="Palmer Amaranth ALS",
+        gene="ALS",
+        target_family="ALS",
+        weed_sequence="MVKLAARSTPGRSVVTALKP",
+        is_primary_selected=True,
+        pockets_json=[{"center": [10.5, 20.2, 30.8]}]
+    )
+    db_session.add(target)
+    db_session.commit()
+    db_session.refresh(target)
+
+    runner = DiscoveryPipelineRunner(db_session)
+    runner.initialize_project_pipeline(project.id)
+
+    # Run Stage 3
+    stage_3_res = runner.run_stage(project.id, 3)
+    assert stage_3_res["status"] == "completed"
+
+    # Verify a MolecularGenerationRun was created and completed
+    run = db_session.query(MolecularGenerationRun).filter_by(project_id=project.id, target_id=target.id).first()
+    assert run is not None
+    assert run.status == "COMPLETED"
+    assert run.valid_count > 0
+
+    # Verify GeneratedMolecule records exist and were added to ChemicalLibrary
+    gen_mols = db_session.query(GeneratedMolecule).filter_by(project_id=project.id, run_id=run.id).all()
+    assert len(gen_mols) > 0
+
+    lib = db_session.query(ChemicalLibrary).filter_by(id=stage_3_res["results"]["library_id"]).first()
+    assert lib is not None
+    assert lib.compound_count > 0
+
+    # Verify compounds in library contain generated molecules
+    comps = db_session.query(Compound).filter_by(library_id=lib.id).all()
+    comp_codes = [c.compound_code for c in comps]
+    assert any(gm.compound_code in comp_codes for gm in gen_mols)

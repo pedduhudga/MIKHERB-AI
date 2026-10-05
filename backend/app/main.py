@@ -321,16 +321,25 @@ def execute_molecular_generation_run(
     if not target:
         raise HTTPException(status_code=400, detail="Run target not found")
 
+    p_center = None
+    if target.pockets_json and isinstance(target.pockets_json, list) and len(target.pockets_json) > 0:
+        p_center = target.pockets_json[0].get("center")
+
     target_info = {
         "target_id": target.id,
         "gene": target.gene or target.name,
-        "target_family": target.target_family,
+        "target_family": target.target_family or "ALS",
         "weed_sequence": target.weed_sequence,
+        "sequence": target.weed_sequence,
         "pdb_id": target.pdb_id,
-        "pockets": target.pockets_json
+        "pockets_json": target.pockets_json,
+        "pocket_center": p_center
     }
 
     filter_cfg = MolecularFilterConfig(**(run.filter_config_json or {})) if run.filter_config_json else None
+
+    existing_mols = db.query(GeneratedMolecule).filter_by(project_id=project_id).all()
+    internal_candidates = [{"smiles": m.canonical_smiles or m.smiles, "inchikey": m.inchikey} for m in existing_mols]
 
     run.status = "RUNNING"
     db.commit()
@@ -342,7 +351,8 @@ def execute_molecular_generation_run(
             requested_count=run.requested_count,
             random_seed=run.random_seed,
             parameters=run.parameters_json,
-            filter_config=filter_cfg
+            filter_config=filter_cfg,
+            internal_candidates=internal_candidates
         )
 
         run.status = gen_res.get("status", "COMPLETED")
