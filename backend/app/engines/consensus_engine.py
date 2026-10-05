@@ -1,7 +1,7 @@
 from typing import Dict, Any, Optional
 
 class MikHerbConsensusScoreEngine:
-    """Calculates the multi-factor MikHerb Consensus Score combining all scientific evidence with configurable weights."""
+    """Calculates evidence-aware dynamic MikHerb Consensus Score, renormalizing over available scientific evidence."""
 
     DEFAULT_WEIGHTS = {
         "target_relevance": 0.10,
@@ -20,41 +20,63 @@ class MikHerbConsensusScoreEngine:
 
     def calculate_score(
         self,
-        target_relevance: float = 80.0,       # 0-100
-        pocket_confidence: float = 90.0,      # 0-100
-        boltz_pKd: float = 8.0,               # e.g., 6.0 to 10.0 -> mapped to 0-100
-        gnina_cnn_score: float = 0.85,        # 0.0 to 1.0 -> mapped to 0-100
-        pose_agreement: str = "HIGH",         # HIGH=100, MEDIUM=60, LOW=20
-        crop_selectivity_score: float = 85.0, # 0-100
-        physicochemical_pass: bool = True,    # True=100, False=40
-        novelty_score: float = 80.0,          # 0-100
-        safety_evidence_clean: bool = True    # True=100, False=30
+        target_relevance: Optional[float] = None,
+        pocket_confidence: Optional[float] = None,
+        boltz_pKd: Optional[float] = None,
+        gnina_cnn_score: Optional[float] = None,
+        pose_agreement: Optional[str] = None,
+        crop_selectivity_score: Optional[float] = None,
+        physicochemical_pass: Optional[bool] = None,
+        novelty_score: Optional[float] = None,
+        safety_evidence_clean: Optional[bool] = None
     ) -> Dict[str, Any]:
 
-        # Normalize component scores to 0 - 100
-        norm_boltz = min(100.0, max(0.0, (boltz_pKd - 5.0) * 20.0))
-        norm_gnina = min(100.0, max(0.0, gnina_cnn_score * 100.0))
-        norm_pose = 100.0 if pose_agreement == "HIGH" else (60.0 if pose_agreement == "MEDIUM" else 20.0)
-        norm_physchem = 100.0 if physicochemical_pass else 40.0
-        norm_safety = 100.0 if safety_evidence_clean else 30.0
+        components = {}
 
-        components = {
-            "target_relevance": target_relevance,
-            "pocket_confidence": pocket_confidence,
-            "boltz_prediction": norm_boltz,
-            "gnina_docking": norm_gnina,
-            "pose_agreement": norm_pose,
-            "crop_selectivity": crop_selectivity_score,
-            "physicochemical_suitability": norm_physchem,
-            "chemical_novelty": novelty_score,
-            "safety_environment": norm_safety
-        }
+        if target_relevance is not None:
+            components["target_relevance"] = float(target_relevance)
 
-        total_score = sum(components[k] * self.weights.get(k, 0.1) for k in components)
+        if pocket_confidence is not None:
+            components["pocket_confidence"] = float(pocket_confidence)
+
+        if boltz_pKd is not None:
+            components["boltz_prediction"] = min(100.0, max(0.0, (float(boltz_pKd) - 5.0) * 20.0))
+
+        if gnina_cnn_score is not None:
+            components["gnina_docking"] = min(100.0, max(0.0, float(gnina_cnn_score) * 100.0))
+
+        if pose_agreement is not None and pose_agreement not in ["NOT_AVAILABLE", "SINGLE_MODEL_ONLY"]:
+            components["pose_agreement"] = 100.0 if pose_agreement == "HIGH" else (60.0 if pose_agreement == "MEDIUM" else 30.0)
+
+        if crop_selectivity_score is not None:
+            components["crop_selectivity"] = float(crop_selectivity_score)
+
+        if physicochemical_pass is not None:
+            components["physicochemical_suitability"] = 100.0 if physicochemical_pass else 40.0
+
+        if novelty_score is not None:
+            components["chemical_novelty"] = float(novelty_score)
+
+        if safety_evidence_clean is not None:
+            components["safety_environment"] = 100.0 if safety_evidence_clean else 30.0
+
+        if not components:
+            return {
+                "mikherb_score": 0.0,
+                "component_scores": {},
+                "status": "NO_EVIDENCE_AVAILABLE"
+            }
+
+        # Dynamically renormalize active weights
+        active_weight_sum = sum(self.weights.get(k, 0.1) for k in components)
+        if active_weight_sum > 0:
+            total_score = sum(components[k] * (self.weights.get(k, 0.1) / active_weight_sum) for k in components)
+        else:
+            total_score = sum(components.values()) / len(components)
 
         return {
             "mikherb_score": round(total_score, 1),
             "component_scores": components,
-            "weights_used": self.weights,
+            "weights_used": {k: round(self.weights.get(k, 0.1) / active_weight_sum, 3) for k in components},
             "disclaimer": "The MikHerb Score is a hypothesis prioritization metric, not experimental proof."
         }

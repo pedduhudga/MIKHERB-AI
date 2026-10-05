@@ -6,7 +6,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import r2_score, mean_squared_error
 
 class QSARActiveLearningEngine:
-    """Trains QSAR models on experimental data and performs active learning uncertainty sampling."""
+    """Trains QSAR models on real experimental data and performs active learning uncertainty sampling with zero fake data."""
 
     def __init__(self):
         self.model = RandomForestRegressor(n_estimators=50, random_state=42)
@@ -22,10 +22,11 @@ class QSARActiveLearningEngine:
         return arr
 
     def train_qsar(self, smiles_list: List[str], activity_list: List[float]) -> Dict[str, Any]:
-        if len(smiles_list) < 3:
+        if not smiles_list or len(smiles_list) < 3:
             return {
                 "status": "INSUFFICIENT_DATA",
-                "message": "At least 3 experimental data points required to train QSAR model."
+                "sample_count": len(smiles_list) if smiles_list else 0,
+                "message": "At least 3 valid experimental observations are required to train QSAR model."
             }
 
         X = np.array([self._smiles_to_fp(s) for s in smiles_list])
@@ -49,20 +50,19 @@ class QSARActiveLearningEngine:
     def predict_with_uncertainty(self, candidate_smiles: List[str]) -> List[Dict[str, Any]]:
         """Predicts activity and uncertainty (std dev across trees in RF) for active learning prioritization."""
         if not self.is_trained:
-            # Fallback heuristic prediction if model not yet trained
             return [
                 {
                     "smiles": s,
-                    "predicted_activity_pct": 75.0,
-                    "uncertainty_std": 12.5,
-                    "active_learning_priority": "HIGH_UNCERTAINTY"
+                    "predicted_activity_pct": None,
+                    "uncertainty_std": None,
+                    "active_learning_priority": "REQUIRES_EXPERIMENTAL_QSAR_TRAINING",
+                    "status": "UNPOWERED_MODEL_NOT_TRAINED"
                 }
                 for s in candidate_smiles
             ]
 
         X = np.array([self._smiles_to_fp(s) for s in candidate_smiles])
 
-        # Collect predictions from each tree in forest
         tree_preds = np.array([tree.predict(X) for tree in self.model.estimators_])
         mean_preds = np.mean(tree_preds, axis=0)
         std_preds = np.std(tree_preds, axis=0)
@@ -73,6 +73,7 @@ class QSARActiveLearningEngine:
                 "smiles": s,
                 "predicted_activity_pct": round(float(mean_preds[i]), 2),
                 "uncertainty_std": round(float(std_preds[i]), 2),
-                "active_learning_priority": "HIGH_INFORMATIONAL_VALUE" if std_preds[i] > 10.0 else "STANDARD"
+                "active_learning_priority": "HIGH_INFORMATIONAL_VALUE" if std_preds[i] > 10.0 else "STANDARD",
+                "status": "COMPLETED"
             })
         return results

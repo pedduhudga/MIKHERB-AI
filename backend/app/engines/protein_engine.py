@@ -77,7 +77,8 @@ class P2RankPocketPredictor:
                                         "center": [float(parts[3]), float(parts[4]), float(parts[5])],
                                         "score": float(parts[1]),
                                         "druggability_score": float(parts[2]),
-                                        "source": "P2Rank Native Binary"
+                                        "source": "P2Rank Native Binary",
+                                        "status": "COMPLETED"
                                     })
                         if pockets:
                             return pockets
@@ -108,7 +109,7 @@ class P2RankPocketPredictor:
         avg_x = sum(a["x"] for a in atoms) / len(atoms)
         avg_y = sum(a["y"] for a in atoms) / len(atoms)
         avg_z = sum(a["z"] for a in atoms) / len(atoms)
-        avg_plddt = sum(plddt_scores) / len(plddt_scores) if plddt_scores else 85.0
+        avg_plddt = sum(plddt_scores) / len(plddt_scores) if plddt_scores else None
 
         cat_atoms = [a for a in atoms if a["res_name"] in ["HIS", "ASP", "GLU", "SER", "CYS", "TYR"]]
         if cat_atoms:
@@ -123,21 +124,23 @@ class P2RankPocketPredictor:
                 "pocket_id": 1,
                 "name": "PDB Atom Centroid Geometry (P2Rank Binary Not Installed)",
                 "center": [round(c_x, 3), round(c_y, 3), round(c_z, 3)],
-                "score": 0.88,
-                "plddt_avg": round(avg_plddt, 1),
-                "volume_A3": 720.0,
-                "druggability_score": 0.82,
-                "source": "Geometric Centroid Analysis (Not P2Rank)"
+                "score": None,
+                "plddt_avg": round(avg_plddt, 1) if avg_plddt else None,
+                "volume_A3": None,
+                "druggability_score": None,
+                "source": "Geometric Centroid Analysis (P2Rank Binary Not Installed)",
+                "status": "NOT_INSTALLED"
             },
             {
                 "pocket_id": 2,
                 "name": "Secondary Surface Site Geometry (P2Rank Binary Not Installed)",
                 "center": [round(c_x + 12.0, 3), round(c_y - 8.0, 3), round(c_z + 5.0, 3)],
-                "score": 0.70,
-                "plddt_avg": round(avg_plddt, 1),
-                "volume_A3": 450.0,
-                "druggability_score": 0.68,
-                "source": "Geometric Centroid Analysis (Not P2Rank)"
+                "score": None,
+                "plddt_avg": round(avg_plddt, 1) if avg_plddt else None,
+                "volume_A3": None,
+                "druggability_score": None,
+                "source": "Geometric Centroid Analysis (P2Rank Binary Not Installed)",
+                "status": "NOT_INSTALLED"
             }
         ]
         return pockets

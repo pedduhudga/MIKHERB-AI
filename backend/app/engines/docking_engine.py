@@ -85,7 +85,7 @@ class RDKitShapeBindingEngine:
         confidence = round(min(95.0, max(60.0, 70.0 + (contact_count * 0.5))), 1)
 
         return {
-            "engine": "RDKit 3D Conformer Steric Complementarity (Surrogate Model)",
+            "engine": "RDKit 3D Conformer Steric Complementarity (Surrogate)",
             "affinity_kcal_mol": affinity_kcal,
             "pKd_predicted": pKd,
             "contacts_in_pocket": contact_count,
@@ -102,13 +102,14 @@ class GNINAAdapter:
         if not gnina_bin:
             fallback_res = RDKitShapeBindingEngine.calculate_binding_score(protein_pdb_path, smiles, pocket_center)
             return {
-                "engine": "RDKit 3D Conformer Steric Complementarity (GNINA Binary Not Installed)",
-                "cnn_score": round(min(0.95, max(0.40, fallback_res["pKd_predicted"] / 10.0)), 3),
+                "engine": "GNINA Deep Learning Docking (Not Installed - RDKit 3D Surrogate Used)",
+                "cnn_score": None,
                 "affinity_kcal_mol": fallback_res["affinity_kcal_mol"],
+                "surrogate_pKd": fallback_res["pKd_predicted"],
                 "pose_confidence": "HIGH" if fallback_res["confidence"] > 80.0 else "MEDIUM",
                 "pocket_center": pocket_center,
-                "execution_mode": "OPEN_SOURCE_RDKIT_3D_SURROGATE",
-                "status": "COMPLETED"
+                "execution_mode": "SURREGATE_HEURISTIC",
+                "status": "NOT_INSTALLED"
             }
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -193,12 +194,13 @@ class Boltz2Adapter:
         if not boltz_bin:
             fallback_res = RDKitShapeBindingEngine.calculate_binding_score(protein_pdb_path, smiles, pocket_center)
             return {
-                "engine": "RDKit 3D Conformer Steric Complementarity (Boltz-2 Binary Not Installed)",
-                "pKd_predicted": fallback_res["pKd_predicted"],
-                "estimated_affinity_nM": round(10 ** (9 - fallback_res["pKd_predicted"]), 1),
-                "complex_confidence_pLDDT": fallback_res["confidence"],
-                "execution_mode": "OPEN_SOURCE_RDKIT_3D_SURROGATE",
-                "status": "COMPLETED"
+                "engine": "Boltz-2 AI (Not Installed - RDKit 3D Surrogate Used)",
+                "pKd_predicted": None,
+                "surrogate_pKd": fallback_res["pKd_predicted"],
+                "estimated_affinity_nM": None,
+                "complex_confidence_pLDDT": None,
+                "execution_mode": "SURREGATE_HEURISTIC",
+                "status": "NOT_INSTALLED"
             }
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -206,7 +208,6 @@ class Boltz2Adapter:
             try:
                 res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
                 if res.returncode == 0:
-                    # Look for actual prediction JSON output
                     confidence_json = None
                     for root, dirs, files in os.walk(tmpdir):
                         for f in files:

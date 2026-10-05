@@ -7,7 +7,7 @@ from app.engines.formulation_engine import FormulationEngine
 from app.engines.consensus_engine import MikHerbConsensusScoreEngine
 
 class AIResearchAgent:
-    """AI Research Agent executing scientific tools with strict non-fabrication guardrails."""
+    """AI Research Agent executing scientific tools with strict non-fabrication guardrails and input requirements."""
 
     def __init__(self):
         self.protein_engine = ProteinEngine()
@@ -36,49 +36,92 @@ class AIResearchAgent:
         context = context or {}
 
         if "protein" in q_lower or "target" in q_lower or "uniprot" in q_lower:
-            uniprot_id = context.get("uniprot_id", "P10324")
-            data = self.protein_engine.get_protein_info(uniprot_id)
-            return {
-                "agent_response": f"Retrieved structure & pocket analysis for target protein {data['name']} (UniProt: {uniprot_id}). Found {len(data['pockets'])} druggable binding pockets.",
-                "tool_executed": "protein_analysis",
-                "output_data": data
-            }
+            uniprot_id = context.get("uniprot_id")
+            if not uniprot_id:
+                return {
+                    "agent_response": "REQUIRED_INPUT_MISSING: Please specify a valid UniProt accession ID (e.g., P10324) for target protein analysis.",
+                    "tool_executed": "protein_analysis",
+                    "status": "INPUT_REQUIRED"
+                }
+            try:
+                data = self.protein_engine.get_protein_info(uniprot_id)
+                return {
+                    "agent_response": f"Retrieved structure & pocket analysis for target protein {data['name']} (UniProt: {uniprot_id}). Found {len(data['pockets'])} druggable binding pockets.",
+                    "tool_executed": "protein_analysis",
+                    "output_data": data,
+                    "status": "COMPLETED"
+                }
+            except Exception as e:
+                return {
+                    "agent_response": f"Protein analysis failed for UniProt ID '{uniprot_id}': {e}",
+                    "tool_executed": "protein_analysis",
+                    "status": "FAILED"
+                }
 
         elif "smiles" in q_lower or "chemical" in q_lower or "rdkit" in q_lower:
-            smiles = context.get("smiles", "CC(=O)Oc1ccccc1C(=O)O")
+            smiles = context.get("smiles")
+            if not smiles:
+                return {
+                    "agent_response": "REQUIRED_INPUT_MISSING: Please provide a valid chemical SMILES string (e.g., CC(=O)Oc1ccccc1C(=O)O) for RDKit analysis.",
+                    "tool_executed": "rdkit_filter",
+                    "status": "INPUT_REQUIRED"
+                }
             desc = self.chemical_engine.calculate_descriptors(smiles)
+            if not desc:
+                return {
+                    "agent_response": f"RDKit analysis failed: Invalid SMILES string '{smiles}'.",
+                    "tool_executed": "rdkit_filter",
+                    "status": "FAILED"
+                }
             return {
                 "agent_response": f"Executed RDKit analysis for compound SMILES `{smiles}`. MW = {desc['mw']} g/mol, LogP = {desc['logp']}, Lipinski Pass: {desc['lipinski_pass']}.",
                 "tool_executed": "rdkit_filter",
-                "output_data": desc
+                "output_data": desc,
+                "status": "COMPLETED"
             }
 
         elif "dock" in q_lower or "boltz" in q_lower or "screen" in q_lower:
-            uniprot_id = context.get("uniprot_id", "P10324")
-            protein_data = self.protein_engine.get_protein_info(uniprot_id)
-            pdb_path = protein_data["pdb_path"]
-            pocket_center = protein_data["pockets"][0]["center"]
-            smiles = context.get("smiles", "CC(=O)Oc1ccccc1C(=O)O")
+            uniprot_id = context.get("uniprot_id")
+            smiles = context.get("smiles")
+            if not uniprot_id or not smiles:
+                return {
+                    "agent_response": "REQUIRED_INPUT_MISSING: Docking requires both a target UniProt ID and a compound SMILES string.",
+                    "tool_executed": "boltz_and_gnina",
+                    "status": "INPUT_REQUIRED"
+                }
+            try:
+                protein_data = self.protein_engine.get_protein_info(uniprot_id)
+                pdb_path = protein_data["pdb_path"]
+                pocket_center = protein_data["pockets"][0]["center"]
 
-            res = self.docking_engine.screen_candidate(pdb_path, smiles, pocket_center)
-            return {
-                "agent_response": f"Completed AI screening with Boltz-2 and GNINA docking. Boltz pKd: {res['boltz']['pKd_predicted']}, GNINA Affinity: {res['gnina']['affinity_kcal_mol']} kcal/mol, Pose Agreement: {res['pose_agreement']}.",
-                "tool_executed": "boltz_and_gnina",
-                "output_data": res
-            }
+                res = self.docking_engine.screen_candidate(pdb_path, smiles, pocket_center)
+                return {
+                    "agent_response": f"Completed screening. Boltz pKd: {res['boltz'].get('pKd_predicted') or 'NOT_INSTALLED'}, GNINA Affinity: {res['gnina'].get('affinity_kcal_mol') or 'NOT_INSTALLED'} kcal/mol, Pose Agreement: {res['pose_agreement']}.",
+                    "tool_executed": "boltz_and_gnina",
+                    "output_data": res,
+                    "status": "COMPLETED"
+                }
+            except Exception as e:
+                return {
+                    "agent_response": f"Docking screening failed: {e}",
+                    "tool_executed": "boltz_and_gnina",
+                    "status": "FAILED"
+                }
 
         elif "formulation" in q_lower or "compatibility" in q_lower:
             res = self.formulation_engine.analyze_formulation("Active-Herbicide-1", 120.0, "Water", "Tween 80", acid_base_buffer="Citrate Buffer")
             return {
                 "agent_response": f"Formulation analysis completed. Compatibility score: {res['compatibility_score']}/100. Predicted pH: {res['predicted_ph']}.",
                 "tool_executed": "formulation",
-                "output_data": res
+                "output_data": res,
+                "status": "COMPLETED"
             }
 
         else:
             score_res = self.consensus_engine.calculate_score()
             return {
-                "agent_response": f"MikHerb AI Agent active. Executed consensus scoring engine. Recommended top candidate MikHerb Score: {score_res['mikherb_score']}/100.",
+                "agent_response": "MIKHERB AI Agent active. Ready for target analysis, chemical library screening, or docking commands.",
                 "tool_executed": "consensus_score",
-                "output_data": score_res
+                "output_data": score_res,
+                "status": "READY"
             }

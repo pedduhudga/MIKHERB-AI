@@ -3,7 +3,7 @@ import os
 import traceback
 from sqlalchemy.orm import Session
 from app.models.models import Project, PipelineStage, TargetProtein, ChemicalLibrary, Compound, Candidate
-from app.engines.protein_engine import ProteinEngine
+from app.engines.protein_engine import ProteinEngine, P2RankPocketPredictor
 from app.engines.chemical_engine import ChemicalEngine
 from app.engines.docking_engine import AIDockingEngine
 from app.engines.selectivity_engine import CropSelectivityEngine
@@ -21,7 +21,6 @@ DEFAULT_STAGES = [
     (7, "Consensus Candidate Ranking & Report Generation")
 ]
 
-# Mapping species to UniProt target accessions (ALS / AHAS & EPSPS targets)
 SPECIES_UNIPROT_MAP = {
     "palmer amaranth": "P10324",
     "amaranthus palmeri": "P10324",
@@ -104,7 +103,6 @@ class DiscoveryPipelineRunner:
         order = stage.stage_order
 
         if order == 1:
-            # Stage 1: Dynamic UniProt accession resolution for Weed vs Crop Target
             weed_uniprot = resolve_uniprot_accession(project.weed_species, "P10324")
             crop_uniprot = resolve_uniprot_accession(project.crop_species, "Q02145")
 
@@ -112,10 +110,12 @@ class DiscoveryPipelineRunner:
 
             crop_pdb_path = target_info["pdb_path"]
             crop_seq = target_info["sequence"]
+            crop_pockets = target_info["pockets"]
             try:
                 crop_info = self.protein_engine.get_protein_info(crop_uniprot, f"{project.crop_species} Homolog Target")
                 crop_seq = crop_info["sequence"]
                 crop_pdb_path = crop_info["pdb_path"]
+                crop_pockets = crop_info["pockets"]
             except Exception:
                 pass
 
@@ -134,7 +134,11 @@ class DiscoveryPipelineRunner:
                 alphafold_id=target_info["alphafold_id"],
                 structure_confidence=plddt_conf,
                 pockets_json=target_info["pockets"],
-                analysis_json={**target_info["analysis"], "crop_pdb_path": crop_pdb_path}
+                analysis_json={
+                    **target_info["analysis"],
+                    "crop_pdb_path": crop_pdb_path,
+                    "crop_pockets": crop_pockets
+                }
             )
             self.db.add(target)
             self.db.commit()
@@ -164,7 +168,6 @@ class DiscoveryPipelineRunner:
                 {"code": f"MH-{project.id}005", "name": "MikHerb Candidate Epsilon", "smiles": "CN1C(=O)C2=CC=CC=C2N=C1C3=CC=CC=C3"}
             ]
 
-            # Fetch PubChem Glyphosate reference compound into library
             glyph_data = self.chemical_engine.fetch_pubchem_compound("Glyphosate")
             if glyph_data and glyph_data.get("smiles"):
                 seed_compounds.append({"code": f"MH-{project.id}006", "name": "Glyphosate Reference", "smiles": glyph_data["smiles"]})
@@ -207,7 +210,7 @@ class DiscoveryPipelineRunner:
                 docking_results.append({
                     "compound_code": comp.compound_code,
                     "smiles": comp.smiles,
-                    "boltz_pKd": res["boltz"].get("pKd_predicted"),
+                    "boltz_pKd": res["boltz"].get("pKd_predicted") or res["boltz"].get("surrogate_pKd"),
                     "gnina_affinity": res["gnina"].get("affinity_kcal_mol"),
                     "pose_agreement": res["pose_agreement"],
                     "gnina_mode": res["gnina"].get("execution_mode")
@@ -215,22 +218,25 @@ class DiscoveryPipelineRunner:
             return {"docking_completed_count": len(docking_results), "top_docking": docking_results[0]}
 
         elif order == 5:
-            # Stage 5: REAL DUAL DOCKING against Weed Target PDB vs Crop Homolog PDB
+            # Stage 5: REAL DUAL DOCKING using WEED pocket center for Weed AND CROP pocket center for Crop
             target = self.db.query(TargetProtein).filter_by(project_id=project.id).first()
             compounds = self.db.query(Compound).all()
 
-            pockets = target.pockets_json or [{"center": [0.0, 0.0, 0.0]}]
-            pocket_center = pockets[0]["center"]
+            weed_pockets = target.pockets_json or [{"center": [0.0, 0.0, 0.0]}]
+            weed_pocket_center = weed_pockets[0]["center"]
             weed_pdb_path = target.pdb_id
-            crop_pdb_path = target.analysis_json.get("crop_pdb_path") if target.analysis_json else weed_pdb_path
+
+            crop_pockets = (target.analysis_json.get("crop_pockets") if target.analysis_json else None) or weed_pockets
+            crop_pocket_center = crop_pockets[0]["center"]
+            crop_pdb_path = (target.analysis_json.get("crop_pdb_path") if target.analysis_json else None) or weed_pdb_path
 
             selectivity_results = []
             for comp in compounds:
-                weed_dock = self.docking_engine.screen_candidate(weed_pdb_path, comp.smiles, pocket_center)
-                crop_dock = self.docking_engine.screen_candidate(crop_pdb_path, comp.smiles, pocket_center)
+                weed_dock = self.docking_engine.screen_candidate(weed_pdb_path, comp.smiles, weed_pocket_center)
+                crop_dock = self.docking_engine.screen_candidate(crop_pdb_path, comp.smiles, crop_pocket_center)
 
-                weed_pKd = weed_dock["boltz"].get("pKd_predicted") or (abs(weed_dock["gnina"].get("affinity_kcal_mol") or -6.0) / 1.363)
-                crop_pKd = crop_dock["boltz"].get("pKd_predicted") or (abs(crop_dock["gnina"].get("affinity_kcal_mol") or -6.0) / 1.363)
+                weed_pKd = weed_dock["boltz"].get("pKd_predicted") or weed_dock["boltz"].get("surrogate_pKd") or (abs(weed_dock["gnina"].get("affinity_kcal_mol") or -6.0) / 1.363)
+                crop_pKd = crop_dock["boltz"].get("pKd_predicted") or crop_dock["boltz"].get("surrogate_pKd") or (abs(crop_dock["gnina"].get("affinity_kcal_mol") or -6.0) / 1.363)
 
                 sel_res = self.selectivity_engine.evaluate_selectivity(
                     target.weed_sequence, target.crop_sequence, weed_affinity_pKd=weed_pKd, crop_affinity_pKd=crop_pKd
@@ -273,18 +279,21 @@ class DiscoveryPipelineRunner:
                 for rec in stage6.results_summary["safety_records"]:
                     safety_map[rec["compound_code"]] = rec.get("safety_clean", True)
 
-            pockets = target.pockets_json or [{"center": [0.0, 0.0, 0.0]}]
-            pocket_center = pockets[0]["center"]
+            weed_pockets = target.pockets_json or [{"center": [0.0, 0.0, 0.0]}]
+            weed_pocket_center = weed_pockets[0]["center"]
             weed_pdb_path = target.pdb_id
-            crop_pdb_path = target.analysis_json.get("crop_pdb_path") if target.analysis_json else weed_pdb_path
+
+            crop_pockets = (target.analysis_json.get("crop_pockets") if target.analysis_json else None) or weed_pockets
+            crop_pocket_center = crop_pockets[0]["center"]
+            crop_pdb_path = (target.analysis_json.get("crop_pdb_path") if target.analysis_json else None) or weed_pdb_path
 
             for idx, comp in enumerate(compounds):
-                weed_dock = self.docking_engine.screen_candidate(weed_pdb_path, comp.smiles, pocket_center)
-                crop_dock = self.docking_engine.screen_candidate(crop_pdb_path, comp.smiles, pocket_center)
+                weed_dock = self.docking_engine.screen_candidate(weed_pdb_path, comp.smiles, weed_pocket_center)
+                crop_dock = self.docking_engine.screen_candidate(crop_pdb_path, comp.smiles, crop_pocket_center)
 
-                weed_pKd = weed_dock["boltz"].get("pKd_predicted") or (abs(weed_dock["gnina"].get("affinity_kcal_mol") or -6.0) / 1.363)
-                crop_pKd = crop_dock["boltz"].get("pKd_predicted") or (abs(crop_dock["gnina"].get("affinity_kcal_mol") or -6.0) / 1.363)
-                gnina_cnn = weed_dock["gnina"].get("cnn_score", 0.75) or 0.75
+                weed_pKd = weed_dock["boltz"].get("pKd_predicted") or weed_dock["boltz"].get("surrogate_pKd") or (abs(weed_dock["gnina"].get("affinity_kcal_mol") or -6.0) / 1.363)
+                crop_pKd = crop_dock["boltz"].get("pKd_predicted") or crop_dock["boltz"].get("surrogate_pKd") or (abs(crop_dock["gnina"].get("affinity_kcal_mol") or -6.0) / 1.363)
+                gnina_cnn = weed_dock["gnina"].get("cnn_score")
 
                 sel_res = self.selectivity_engine.evaluate_selectivity(
                     target.weed_sequence, target.crop_sequence, weed_affinity_pKd=weed_pKd, crop_affinity_pKd=crop_pKd
@@ -309,8 +318,8 @@ class DiscoveryPipelineRunner:
                     target_name=target.name,
                     evidence_level=1,
                     boltz_affinity_score=weed_pKd,
-                    boltz_confidence=weed_dock["boltz"].get("complex_confidence_pLDDT", 85.0),
-                    gnina_docking_score=weed_dock["gnina"].get("affinity_kcal_mol", -8.0),
+                    boltz_confidence=weed_dock["boltz"].get("complex_confidence_pLDDT"),
+                    gnina_docking_score=weed_dock["gnina"].get("affinity_kcal_mol"),
                     pose_agreement=weed_dock["pose_agreement"],
                     crop_selectivity_score=sel_res["selectivity_score"],
                     mikherb_score=consensus["mikherb_score"],

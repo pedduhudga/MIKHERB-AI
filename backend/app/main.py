@@ -1,3 +1,4 @@
+import datetime
 import os
 import json
 from typing import List, Optional, Dict, Any
@@ -20,6 +21,7 @@ from app.engines.docking_engine import AIDockingEngine
 from app.engines.selectivity_engine import CropSelectivityEngine
 from app.engines.formulation_engine import FormulationEngine
 from app.engines.consensus_engine import MikHerbConsensusScoreEngine
+from app.engines.status_manager import engine_status_manager
 from app.services.pipeline_service import DiscoveryPipelineRunner
 from app.services.statistics_service import StatisticalAnalyzer
 from app.services.qsar_service import QSARActiveLearningEngine
@@ -55,6 +57,10 @@ agent_service = AIResearchAgent()
 def get_hardware_status():
     return check_hardware_status()
 
+@app.get("/api/v1/system/engines")
+def get_engines_status():
+    return engine_status_manager.get_all_statuses()
+
 # Projects & Pipeline
 @app.post("/api/v1/projects", response_model=ProjectResponse)
 def create_project(project_in: ProjectCreate, db: Session = Depends(get_db)):
@@ -63,7 +69,6 @@ def create_project(project_in: ProjectCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_project)
 
-    # Initialize pipeline
     runner = DiscoveryPipelineRunner(db)
     runner.initialize_project_pipeline(db_project.id)
     return db_project
@@ -205,16 +210,16 @@ def list_experiment_trials(db: Session = Depends(get_db)):
 def train_qsar_model(db: Session = Depends(get_db)):
     trials = db.query(ExperimentTrial).all()
     if not trials:
-        # Seed dummy trials for demonstration if DB empty
-        smiles_list = ["CC(=O)Oc1ccccc1C(=O)O", "Cc1ccc(cc1)S(=O)(=O)N", "O=C(O)c1ccccc1O"]
-        act_list = [85.0, 40.0, 70.0]
-    else:
-        # Extract smiles & activity from trials
-        smiles_list = ["CC(=O)Oc1ccccc1C(=O)O" for _ in trials]  # simplified fallback mapping
-        act_list = [t.visual_injury_pct or 50.0 for t in trials]
+        return {
+            "status": "INSUFFICIENT_DATA",
+            "sample_count": 0,
+            "message": "Zero experimental trials recorded. At least 3 experimental observation trials are required to train QSAR model."
+        }
 
-    train_res = qsar_engine.train_qsar(smiles_list, act_list)
-    return train_res
+    smiles_list = [t.compound_code for t in trials if t.compound_code and "MH-" in t.compound_code]
+    act_list = [t.visual_injury_pct or 0.0 for t in trials if t.compound_code and "MH-" in t.compound_code]
+
+    return qsar_engine.train_qsar(smiles_list, act_list)
 
 @app.post("/api/v1/ai_lab/active_learning_prioritize")
 def active_learning_prioritize(smiles_list: List[str]):
