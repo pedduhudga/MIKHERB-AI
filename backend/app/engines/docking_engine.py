@@ -102,14 +102,13 @@ class GNINAAdapter:
         if not gnina_bin:
             fallback_res = RDKitShapeBindingEngine.calculate_binding_score(protein_pdb_path, smiles, pocket_center)
             return {
-                "engine": "GNINA Deep Learning Docking (Not Installed - RDKit 3D Surrogate Used)",
+                "engine": "GNINA Deep Learning Docking (Not Installed)",
                 "cnn_score": None,
                 "affinity_kcal_mol": None,
-                "surrogate_affinity_kcal_mol": fallback_res["affinity_kcal_mol"],
-                "surrogate_pKd": fallback_res["pKd_predicted"],
+                "surrogate_heuristic_score": fallback_res,
                 "pose_confidence": None,
                 "pocket_center": pocket_center,
-                "execution_mode": "SURREGATE_HEURISTIC",
+                "execution_mode": "SURROGATE_HEURISTIC",
                 "status": "NOT_INSTALLED"
             }
 
@@ -195,12 +194,12 @@ class Boltz2Adapter:
         if not boltz_bin:
             fallback_res = RDKitShapeBindingEngine.calculate_binding_score(protein_pdb_path, smiles, pocket_center)
             return {
-                "engine": "Boltz-2 AI (Not Installed - RDKit 3D Surrogate Used)",
+                "engine": "Boltz-2 AI (Not Installed)",
                 "pKd_predicted": None,
-                "surrogate_pKd": fallback_res["pKd_predicted"],
+                "surrogate_heuristic_score": fallback_res,
                 "estimated_affinity_nM": None,
                 "complex_confidence_pLDDT": None,
-                "execution_mode": "SURREGATE_HEURISTIC",
+                "execution_mode": "SURROGATE_HEURISTIC",
                 "status": "NOT_INSTALLED"
             }
 
@@ -274,18 +273,11 @@ class AIDockingEngine:
 
         boltz_pKd = boltz_res.get("pKd_predicted") if boltz_res.get("status") == "COMPLETED" else None
         gnina_aff = gnina_res.get("affinity_kcal_mol") if gnina_res.get("status") == "COMPLETED" else None
-        gnina_pKd = abs(gnina_aff) / 1.363 if gnina_aff is not None else None
 
-        if boltz_pKd is not None and gnina_pKd is not None:
-            diff = abs(boltz_pKd - gnina_pKd)
-            if diff <= 1.5:
-                pose_agreement = "HIGH"
-            elif diff <= 3.0:
-                pose_agreement = "MEDIUM"
-            else:
-                pose_agreement = "LOW"
+        if boltz_pKd is not None and gnina_aff is not None:
+            pose_agreement = "MULTI_MODEL_COMPLETED"
         else:
-            pose_agreement = "SINGLE_MODEL_ONLY" if (boltz_pKd is not None or gnina_pKd is not None) else "NOT_AVAILABLE"
+            pose_agreement = "SINGLE_MODEL_ONLY" if (boltz_pKd is not None or gnina_aff is not None) else "NOT_AVAILABLE"
 
         return {
             "boltz": boltz_res,

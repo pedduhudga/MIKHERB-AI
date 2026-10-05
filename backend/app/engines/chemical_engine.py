@@ -153,12 +153,15 @@ class ChemicalEngine:
                     if sim > max_sim:
                         max_sim = sim
 
+                struct_dissim = round(max(0.0, min(100.0, (1.0 - max_sim) * 100.0)), 1)
+
                 processed.append({
                     "compound_code": code,
                     "name": comp.get("name", f"Compound-{idx}"),
                     "smiles": std_smiles,
                     **desc,
                     "max_tanimoto_reference_similarity": max_sim,
+                    "structural_dissimilarity_score": struct_dissim,
                     "novelty_score": round(max(10.0, 100.0 - (max_sim * 80.0)), 1)
                 })
         return processed
