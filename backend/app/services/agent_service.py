@@ -104,8 +104,16 @@ class AIResearchAgent:
             try:
                 protein_data = self.protein_engine.get_protein_info(uniprot_id)
                 pdb_path = protein_data["pdb_path"]
-                pocket_center = protein_data["pockets"][0]["center"]
+                pockets = protein_data.get("pockets", [])
+                native_pocket = pockets[0] if (pockets and pockets[0].get("status") == "COMPLETED") else None
+                if not native_pocket or not native_pocket.get("center"):
+                    return {
+                        "agent_response": f"Docking NOT AVAILABLE: Native P2Rank pocket prediction missing for target protein {uniprot_id}.",
+                        "tool_executed": "boltz_and_gnina",
+                        "status": "P2RANK_POCKET_ENGINE_NOT_INSTALLED"
+                    }
 
+                pocket_center = native_pocket["center"]
                 res = self.docking_engine.screen_candidate(pdb_path, smiles, pocket_center)
                 return {
                     "agent_response": f"Completed native screening. Boltz pKd: {res['boltz'].get('pKd_predicted') or 'NOT_INSTALLED'}, GNINA Affinity: {res['gnina'].get('affinity_kcal_mol') or 'NOT_INSTALLED'} kcal/mol, Pose Agreement: {res['pose_agreement']}.",

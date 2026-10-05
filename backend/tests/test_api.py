@@ -42,3 +42,36 @@ def test_formulation_analyze_endpoint():
     data = response.json()
     assert data["compatibility_score"] > 0
     assert data["ph_predicted"] > 0
+
+def test_pipeline_execution_integrity():
+    from app.services.pipeline_service import DiscoveryPipelineRunner
+    from app.db.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        payload = {
+            "name": "Pipeline Integrity Test Project",
+            "weed_species": "Palmer Amaranth",
+            "crop_species": "Soybean",
+            "objective": "new_herbicide"
+        }
+        response = client.post("/api/v1/projects", json=payload)
+        assert response.status_code == 200
+        proj_id = response.json()["id"]
+
+        runner = DiscoveryPipelineRunner(db)
+        res = runner.run_pipeline(proj_id)
+        assert res["status"] == "COMPLETED"
+
+        cand_resp = client.get(f"/api/v1/projects/{proj_id}/candidates")
+        assert cand_resp.status_code == 200
+        candidates = cand_resp.json()
+        assert len(candidates) > 0
+
+        for c in candidates:
+            assert "evidence_level" in c
+            assert "status" in c
+            if c["evidence_level"] == 0:
+                assert c["status"] == "HYPOTHESIS_ONLY"
+    finally:
+        db.close()
