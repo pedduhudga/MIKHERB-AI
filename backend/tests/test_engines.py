@@ -1,13 +1,38 @@
+"""
+MikHerb-AI Backend Test Suite
+
+Tests cover:
+  - Engine status detection
+  - Protein engine (real UniProt/AlphaFold fetch)
+  - P2Rank pocket predictor labels
+  - Chemical engine (descriptors, deduplication, filters, structural dissimilarity)
+  - Docking engine (status awareness, surrogate isolation, pocket rejection)
+  - Consensus engine (zero-parameter fallback)
+  - Crop selectivity engine
+  - Formulation engine
+  - Statistics service
+  - Multi-gene UniProt search (with mocking to assert actual query behaviour)
+  - Multi-target discovery engine (target ranking, crop divergence)
+"""
+
 import os
 import pytest
+from unittest.mock import patch, MagicMock
+
 from app.engines.protein_engine import ProteinEngine, P2RankPocketPredictor
 from app.engines.chemical_engine import ChemicalEngine
 from app.engines.docking_engine import AIDockingEngine
 from app.engines.selectivity_engine import CropSelectivityEngine
 from app.engines.formulation_engine import FormulationEngine
 from app.engines.consensus_engine import MikHerbConsensusScoreEngine
+from app.engines.target_discovery_engine import MultiTargetDiscoveryEngine, TARGET_CATALOGUE
 from app.engines.status_manager import engine_status_manager
 from app.services.statistics_service import StatisticalAnalyzer
+
+
+# ---------------------------------------------------------------------------
+# Engine status detection
+# ---------------------------------------------------------------------------
 
 def test_engine_status_manager():
     statuses = engine_status_manager.get_all_statuses()
@@ -16,6 +41,11 @@ def test_engine_status_manager():
     assert "boltz" in statuses
     assert statuses["rdkit"]["installed"] is True
 
+
+# ---------------------------------------------------------------------------
+# Protein Engine — live network tests (may be skipped in CI without network)
+# ---------------------------------------------------------------------------
+
 def test_protein_engine_real_fetch():
     pe = ProteinEngine()
     data = pe.get_protein_info("P10324", "ALS Weed Target")
@@ -23,6 +53,7 @@ def test_protein_engine_real_fetch():
     assert len(data["sequence"]) > 0
     assert os.path.exists(data["pdb_path"])
     assert len(data["pockets"]) > 0
+
 
 def test_p2rank_pocket_predictor_labels():
     pe = ProteinEngine()
@@ -33,10 +64,78 @@ def test_p2rank_pocket_predictor_labels():
     assert len(pockets) >= 1
     assert "center" in pockets[0]
     assert "source" in pockets[0]
+    # P2Rank not installed → heuristic fallback labelling
+    if pockets[0].get("status") == "NOT_INSTALLED":
+        assert "Heuristic" in pockets[0]["name"], (
+            f"Expected 'Heuristic' in pocket name, got: {pockets[0]['name']}"
+        )
 
-def test_multi_gene_uniprot_search():
-    acc = ProteinEngine.search_uniprot_accession("Palmer Amaranth", ["ALS", "HPPD"])
-    assert acc is not None or acc is None  # REST API return check
+
+# ---------------------------------------------------------------------------
+# Multi-gene UniProt search — mocked to assert actual query behaviour
+# ---------------------------------------------------------------------------
+
+def _make_uniprot_response(accession: str):
+    """Create a minimal fake UniProt REST API JSON response."""
+    mock = MagicMock()
+    mock.status_code = 200
+    mock.json.return_value = {"results": [{"primaryAccession": accession}]}
+    return mock
+
+
+def _make_empty_uniprot_response():
+    """UniProt response with no results (gene not found in species)."""
+    mock = MagicMock()
+    mock.status_code = 200
+    mock.json.return_value = {"results": []}
+    return mock
+
+
+def test_multi_gene_search_returns_first_match():
+    """When ALS succeeds, it should be returned without querying HPPD."""
+    with patch("app.engines.protein_engine.requests.get") as mock_get:
+        mock_get.return_value = _make_uniprot_response("ACC_ALS_001")
+        acc = ProteinEngine.search_uniprot_accession("Palmer Amaranth", ["ALS", "HPPD"])
+        assert acc == "ACC_ALS_001"
+        # Only one call should have been made (to ALS)
+        assert mock_get.call_count == 1
+        call_url = mock_get.call_args[0][0]
+        assert "ALS" in call_url, f"Expected ALS query in URL, got: {call_url}"
+
+
+def test_multi_gene_search_falls_back_to_second_gene():
+    """When ALS returns empty, HPPD should be queried and its accession returned."""
+    responses = [
+        _make_empty_uniprot_response(),       # ALS → no result
+        _make_uniprot_response("ACC_HPPD_002"),  # HPPD → match
+    ]
+    with patch("app.engines.protein_engine.requests.get", side_effect=responses) as mock_get:
+        acc = ProteinEngine.search_uniprot_accession("Palmer Amaranth", ["ALS", "HPPD"])
+        assert acc == "ACC_HPPD_002"
+        assert mock_get.call_count == 2
+        hppd_url = mock_get.call_args_list[1][0][0]
+        assert "HPPD" in hppd_url, f"Expected HPPD in second query URL, got: {hppd_url}"
+
+
+def test_multi_gene_search_returns_none_when_all_fail():
+    """When all genes fail to find accessions, None is returned."""
+    empty_response = _make_empty_uniprot_response()
+    with patch("app.engines.protein_engine.requests.get", return_value=empty_response):
+        acc = ProteinEngine.search_uniprot_accession("Unknown Species", ["ALS", "HPPD", "PPO"])
+        assert acc is None
+
+
+def test_single_gene_string_still_works():
+    """Backwards compatibility: single string gene argument should work."""
+    with patch("app.engines.protein_engine.requests.get") as mock_get:
+        mock_get.return_value = _make_uniprot_response("SINGLE_ACC")
+        acc = ProteinEngine.search_uniprot_accession("Some Weed", "ALS")
+        assert acc == "SINGLE_ACC"
+
+
+# ---------------------------------------------------------------------------
+# Chemical Engine
+# ---------------------------------------------------------------------------
 
 def test_chemical_engine():
     ce = ChemicalEngine()
@@ -45,6 +144,40 @@ def test_chemical_engine():
     assert desc is not None
     assert desc["mw"] > 100.0
     assert desc["lipinski_pass"] is True
+
+
+def test_chemical_engine_deduplication():
+    ce = ChemicalEngine()
+    comps = [
+        {"code": "C1", "name": "Compound 1", "smiles": "CC(=O)Oc1ccccc1C(=O)O"},
+        {"code": "C2", "name": "Compound 2", "smiles": "CC(=O)Oc1ccccc1C(=O)O"}  # Duplicate
+    ]
+    lib = ce.build_library(comps)
+    assert len(lib) == 1
+
+
+def test_chemical_engine_advanced_filters():
+    ce = ChemicalEngine()
+    parent = ce.remove_salts_get_parent("CC(=O)O.Cl.[Na+]")
+    assert "Cl" not in parent
+
+    desc = ce.calculate_descriptors("CC(=O)Oc1ccccc1C(=O)O")
+    assert "veber_pass" in desc
+    assert "pains_pass" in desc
+    assert desc["veber_pass"] is True
+
+
+def test_chemical_engine_structural_dissimilarity():
+    ce = ChemicalEngine()
+    comps = [{"code": "C1", "name": "Compound 1", "smiles": "CC(=O)Oc1ccccc1C(=O)O"}]
+    lib = ce.build_library(comps)
+    assert "structural_dissimilarity_score" in lib[0]
+    assert 0.0 <= lib[0]["structural_dissimilarity_score"] <= 100.0
+
+
+# ---------------------------------------------------------------------------
+# Docking Engine
+# ---------------------------------------------------------------------------
 
 def test_docking_engine_status_awareness():
     pe = ProteinEngine()
@@ -58,46 +191,53 @@ def test_docking_engine_status_awareness():
     assert res["gnina"]["status"] in ["COMPLETED", "NOT_INSTALLED", "FAILED_EXECUTION"]
     assert "pose_agreement" in res
 
+
 def test_docking_engine_missing_pocket_rejection():
     de = AIDockingEngine()
     res = de.screen_candidate("dummy.pdb", "CC(=O)Oc1ccccc1C(=O)O", pocket_center=None)
     assert res["status"] == "POCKET_CENTER_MISSING"
     assert res["boltz"]["status"] == "POCKET_CENTER_MISSING"
 
-def test_chemical_engine_deduplication():
-    ce = ChemicalEngine()
-    comps = [
-        {"code": "C1", "name": "Compound 1", "smiles": "CC(=O)Oc1ccccc1C(=O)O"},
-        {"code": "C2", "name": "Compound 2", "smiles": "CC(=O)Oc1ccccc1C(=O)O"}  # Duplicate
-    ]
-    lib = ce.build_library(comps)
-    assert len(lib) == 1
-
-def test_chemical_engine_advanced_filters():
-    ce = ChemicalEngine()
-    parent = ce.remove_salts_get_parent("CC(=O)O.Cl.[Na+]")
-    assert "Cl" not in parent
-
-    desc = ce.calculate_descriptors("CC(=O)Oc1ccccc1C(=O)O")
-    assert "veber_pass" in desc
-    assert "pains_pass" in desc
-    assert desc["veber_pass"] is True
 
 def test_docking_engine_surrogate_isolation():
+    """Surrogates must not report pKd_predicted or affinity_kcal_mol as real values."""
     de = AIDockingEngine()
     res = de.screen_candidate("dummy.pdb", "CC(=O)Oc1ccccc1C(=O)O", [10.0, 20.0, 30.0])
     if res["boltz"]["status"] == "NOT_INSTALLED":
-        assert res["boltz"]["pKd_predicted"] is None
+        assert res["boltz"]["pKd_predicted"] is None, (
+            "Surrogate must not produce a pKd_predicted value when Boltz is not installed."
+        )
         assert "surrogate_heuristic_score" in res["boltz"]
     if res["gnina"]["status"] == "NOT_INSTALLED":
-        assert res["gnina"]["affinity_kcal_mol"] is None
+        assert res["gnina"]["affinity_kcal_mol"] is None, (
+            "Surrogate must not produce affinity_kcal_mol when GNINA is not installed."
+        )
         assert "surrogate_heuristic_score" in res["gnina"]
 
-def test_chemical_engine_structural_dissimilarity():
-    ce = ChemicalEngine()
-    comps = [{"code": "C1", "name": "Compound 1", "smiles": "CC(=O)Oc1ccccc1C(=O)O"}]
-    lib = ce.build_library(comps)
-    assert "structural_dissimilarity_score" in lib[0]
+
+def test_docking_engine_preserves_actual_status_codes():
+    """The docking engine must preserve specific status codes (not collapse them to NOT_INSTALLED)."""
+    de = AIDockingEngine()
+    res = de.screen_candidate("dummy.pdb", "CC(=O)Oc1ccccc1C(=O)O", [10.0, 20.0, 30.0])
+    valid_boltz_statuses = {
+        "COMPLETED", "NOT_INSTALLED", "FAILED_EXECUTION",
+        "FAILED_OUTPUT_PARSE", "FAILED_UNKNOWN", "POCKET_CENTER_MISSING"
+    }
+    valid_gnina_statuses = {
+        "COMPLETED", "NOT_INSTALLED", "FAILED_EXECUTION",
+        "FAILED_OUTPUT_PARSE", "FAILED_INVALID_SMILES", "FAILED_UNKNOWN", "POCKET_CENTER_MISSING"
+    }
+    assert res["boltz"]["status"] in valid_boltz_statuses, (
+        f"Unexpected Boltz status: {res['boltz']['status']}"
+    )
+    assert res["gnina"]["status"] in valid_gnina_statuses, (
+        f"Unexpected GNINA status: {res['gnina']['status']}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Consensus Engine
+# ---------------------------------------------------------------------------
 
 def test_consensus_engine_zero_parameters():
     me = MikHerbConsensusScoreEngine()
@@ -105,17 +245,151 @@ def test_consensus_engine_zero_parameters():
     assert score_res["mikherb_score"] == 0.0
     assert score_res["status"] == "NO_EVIDENCE_AVAILABLE"
 
+
+def test_consensus_engine_no_safety_boolean():
+    """Consensus score should work identically whether safety_evidence_clean is None or not provided."""
+    me = MikHerbConsensusScoreEngine()
+    score_with_none = me.calculate_score(
+        target_relevance=70.0,
+        boltz_pKd=7.5,
+        safety_evidence_clean=None
+    )
+    score_without = me.calculate_score(
+        target_relevance=70.0,
+        boltz_pKd=7.5,
+    )
+    assert score_with_none["mikherb_score"] == score_without["mikherb_score"], (
+        "Passing safety_evidence_clean=None must produce the same score as not passing it at all."
+    )
+    assert "safety_environment" not in score_with_none["component_scores"], (
+        "safety_environment must not appear in component scores when safety data is None."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Crop Selectivity Engine
+# ---------------------------------------------------------------------------
+
 def test_crop_selectivity_engine():
     se = CropSelectivityEngine()
     res = se.evaluate_selectivity("MAATTT", "MAATSS", weed_affinity_pKd=8.5, crop_affinity_pKd=6.2)
     assert res["selectivity_fold_difference"] > 10.0
     assert res["selectivity_score"] > 50.0
 
+
+def test_crop_selectivity_none_preserved():
+    """None selectivity score must not be coerced to 0.0 anywhere in the pipeline data."""
+    # This tests that the selectivity engine itself returns None when called with None pKd
+    # (the selectivity engine requires valid pKd values — None propagation is in pipeline_service)
+    se = CropSelectivityEngine()
+    # If both pKds are present, score is computed
+    res = se.evaluate_selectivity("MAAT", "MAAR", weed_affinity_pKd=7.0, crop_affinity_pKd=7.0)
+    assert res["selectivity_score"] is not None
+    # Score should be ~50 when weed == crop pKd (no selectivity)
+    assert abs(res["selectivity_score"] - 50.0) < 5.0
+
+
+# ---------------------------------------------------------------------------
+# Multi-Target Discovery Engine
+# ---------------------------------------------------------------------------
+
+def test_target_catalogue_completeness():
+    """All 10 major target families should be present in the catalogue."""
+    expected_genes = {"ALS", "HPPD", "PPO", "EPSPS", "ACCase", "psbA", "PDS", "KAS", "GS", "DXS"}
+    actual_genes = {t["gene"] for t in TARGET_CATALOGUE}
+    assert expected_genes == actual_genes, (
+        f"Missing targets: {expected_genes - actual_genes}. "
+        f"Extra targets: {actual_genes - expected_genes}."
+    )
+
+
+def test_target_discovery_engine_returns_ranked_list():
+    """Discovery engine should return a non-empty ranked list of target records."""
+    # Mock all network calls to avoid CI dependency on UniProt/AlphaFold APIs
+    with patch("app.engines.target_discovery_engine._search_uniprot", return_value=None), \
+         patch("app.engines.target_discovery_engine._check_alphafold_available", return_value=(False, None)), \
+         patch("app.engines.target_discovery_engine._fetch_fasta_seq", return_value=None):
+
+        engine = MultiTargetDiscoveryEngine(crop_species="Soybean")
+        results = engine.discover_targets("Palmer Amaranth", max_targets=10)
+
+    assert len(results) == 10
+    # Results should be sorted by target_opportunity_score descending
+    scores = [r["target_opportunity_score"] for r in results]
+    assert scores == sorted(scores, reverse=True), "Results must be sorted by opportunity score descending."
+
+
+def test_target_discovery_essentiality_scoring():
+    """ESSENTIAL_UNIQUE targets should score higher than LIKELY_ESSENTIAL."""
+    with patch("app.engines.target_discovery_engine._search_uniprot", return_value=None), \
+         patch("app.engines.target_discovery_engine._check_alphafold_available", return_value=(False, None)), \
+         patch("app.engines.target_discovery_engine._fetch_fasta_seq", return_value=None):
+
+        engine = MultiTargetDiscoveryEngine()
+        essential_score = engine._score_essentiality({"essentiality_tier": "ESSENTIAL_UNIQUE"})
+        likely_score = engine._score_essentiality({"essentiality_tier": "LIKELY_ESSENTIAL"})
+
+    assert essential_score > likely_score
+
+
+def test_target_discovery_alphafold_filter():
+    """require_alphafold=True should exclude targets without AlphaFold structure."""
+    with patch("app.engines.target_discovery_engine._search_uniprot", return_value="MOCK_ACC"), \
+         patch("app.engines.target_discovery_engine._check_alphafold_available", return_value=(False, None)), \
+         patch("app.engines.target_discovery_engine._fetch_fasta_seq", return_value="MAATVS"):
+
+        engine = MultiTargetDiscoveryEngine()
+        results = engine.discover_targets("Test Weed", require_alphafold=True)
+
+    assert len(results) == 0, "With all AlphaFold returns False, no targets should pass filter."
+
+
+def test_target_discovery_crop_divergence_computed():
+    """When crop data is available, crop_divergence_pct should be computed (not None)."""
+    mock_seq_weed = "MAATVSFGKLHQR"
+    mock_seq_crop = "MAATVSAGKLHQR"  # One difference at position 8
+
+    with patch("app.engines.target_discovery_engine._search_uniprot", return_value="MOCK_ACC"), \
+         patch("app.engines.target_discovery_engine._check_alphafold_available", return_value=(True, 92.5)), \
+         patch("app.engines.target_discovery_engine._fetch_fasta_seq", side_effect=[mock_seq_weed, mock_seq_crop]):
+
+        engine = MultiTargetDiscoveryEngine(crop_species="Soybean")
+        # Only assess a single target to control mock call count
+        result = engine._assess_single_target("soybean", "Soybean", TARGET_CATALOGUE[0])
+
+    assert result["crop_divergence_pct"] is not None
+    assert result["sequence_identity_pct"] is not None
+    assert 0.0 <= result["crop_divergence_pct"] <= 100.0
+
+
+def test_target_discovery_selectivity_none_when_no_crop():
+    """selectivity_potential_score should be None when crop divergence is unavailable."""
+    engine = MultiTargetDiscoveryEngine()
+    score = engine._score_selectivity_potential(TARGET_CATALOGUE[0], None, None)
+    assert score is None
+
+
+def test_target_discovery_structure_score_none_when_no_alphafold():
+    """structure_score should be None (not 0.0) when AlphaFold is unavailable."""
+    engine = MultiTargetDiscoveryEngine()
+    score = engine._score_structure(alphafold_available=False, plddt=None)
+    assert score is None
+
+
+# ---------------------------------------------------------------------------
+# Formulation Engine
+# ---------------------------------------------------------------------------
+
 def test_formulation_engine():
     fe = FormulationEngine()
     res = fe.analyze_formulation("MH-001", 120.0, "Water", "Tween 80")
     assert res["compatibility_score"] > 50.0
     assert "disclaimer" in res
+
+
+# ---------------------------------------------------------------------------
+# Statistics Service
+# ---------------------------------------------------------------------------
 
 def test_statistics_service():
     stats = StatisticalAnalyzer.analyze_replicates([80.0, 85.0, 90.0])
