@@ -28,6 +28,7 @@ class MikHerbConsensusScoreEngine:
         crop_selectivity_score: Optional[float] = None,
         physicochemical_pass: Optional[bool] = None,
         novelty_score: Optional[float] = None,
+        safety_tier: Optional[str] = None,
         safety_evidence_clean: Optional[bool] = None
     ) -> Dict[str, Any]:
 
@@ -57,7 +58,15 @@ class MikHerbConsensusScoreEngine:
         if novelty_score is not None:
             components["chemical_novelty"] = float(novelty_score)
 
-        if safety_evidence_clean is not None:
+        # Explicit safety tier handling (avoids treating predictive screening as verified safety proof)
+        if safety_tier is not None and safety_tier not in ["UNKNOWN", "UNKNOWN_REQUIRES_ASSAY"]:
+            if safety_tier in ["VALIDATED_SAFETY", "VALIDATED_ASSAY_SAFE"]:
+                components["safety_environment"] = 100.0
+            elif safety_tier in ["PREDICTIVE_SAFETY", "PREDICTIVE_CLEAN"]:
+                components["safety_environment"] = 75.0
+            elif safety_tier in ["PREDICTIVE_CONCERN", "HIGH_MOBILITY"]:
+                components["safety_environment"] = 35.0
+        elif safety_evidence_clean is not None:
             components["safety_environment"] = 100.0 if safety_evidence_clean else 30.0
 
         if not components:

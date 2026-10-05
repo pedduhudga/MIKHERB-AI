@@ -64,7 +64,7 @@ def get_engines_status():
 # Projects & Pipeline
 @app.post("/api/v1/projects", response_model=ProjectResponse)
 def create_project(project_in: ProjectCreate, db: Session = Depends(get_db)):
-    db_project = Project(**project_in.dict())
+    db_project = Project(**project_in.model_dump())
     db.add(db_project)
     db.commit()
     db.refresh(db_project)

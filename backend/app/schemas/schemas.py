@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
@@ -19,8 +19,7 @@ class ProjectResponse(ProjectBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class PipelineStageResponse(BaseModel):
     id: int
@@ -32,8 +31,7 @@ class PipelineStageResponse(BaseModel):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class TargetProteinResponse(BaseModel):
     id: int
@@ -45,17 +43,16 @@ class TargetProteinResponse(BaseModel):
     crop_sequence: Optional[str] = None
     pdb_id: Optional[str] = None
     alphafold_id: Optional[str] = None
-    essentiality_score: float
-    weed_specificity_score: float
-    crop_divergence_score: float
-    structure_confidence: float
-    druggability_score: float
-    existing_evidence_score: float
-    total_opportunity_score: float
+    essentiality_score: Optional[float] = None
+    weed_specificity_score: Optional[float] = None
+    crop_divergence_score: Optional[float] = None
+    structure_confidence: Optional[float] = None
+    druggability_score: Optional[float] = None
+    existing_evidence_score: Optional[float] = None
+    total_opportunity_score: Optional[float] = None
     pockets_json: Optional[List[Dict[str, Any]]] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class CompoundResponse(BaseModel):
     id: int
@@ -71,8 +68,7 @@ class CompoundResponse(BaseModel):
     lipinski_pass: bool
     novelty_score: float
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class CandidateResponse(BaseModel):
     id: int
@@ -85,13 +81,12 @@ class CandidateResponse(BaseModel):
     boltz_confidence: Optional[float] = None
     gnina_docking_score: Optional[float] = None
     diffdock_score: Optional[float] = None
-    pose_agreement: str
-    crop_selectivity_score: float
-    mikherb_score: float
+    pose_agreement: Optional[str] = None
+    crop_selectivity_score: Optional[float] = None
+    mikherb_score: Optional[float] = None
     status: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class FormulationCreate(BaseModel):
     name: str
@@ -113,8 +108,7 @@ class FormulationResponse(FormulationCreate):
     compatibility_score: float
     risk_flags: Optional[List[str]] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class ExperimentTrialCreate(BaseModel):
     trial_name: str
@@ -140,5 +134,4 @@ class ExperimentTrialResponse(BaseModel):
     statistical_summary: Optional[Dict[str, Any]] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

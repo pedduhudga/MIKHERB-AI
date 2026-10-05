@@ -3,7 +3,7 @@ import math
 import requests
 import subprocess
 import shutil
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 class ProteinAnalyzer:
     """Analyzes protein sequence features, domains, disorder, and structural quality."""
@@ -144,10 +144,20 @@ class ProteinEngine:
 
     @staticmethod
     def search_uniprot_accession(species_name: str, target_gene: Any = "ALS") -> Optional[str]:
-        """Dynamically queries UniProt REST API for a given species and target gene or gene list."""
+        """Dynamically queries UniProt REST API for a given species and target gene or gene list.
+        
+        Args:
+            species_name:  Common or latin species name.
+            target_gene:   A single gene symbol string, or a list of gene symbols.
+                           Each gene is tried in order; the first match is returned.
+        """
         genes = [target_gene] if isinstance(target_gene, str) else list(target_gene)
         for g in genes:
-            url = f"https://rest.uniprot.org/uniprotkb/search?query=organism_name:%22{requests.utils.quote(species_name)}%22%20AND%20gene:{requests.utils.quote(str(g))}&format=json"
+            url = (
+                f"https://rest.uniprot.org/uniprotkb/search"
+                f"?query=organism_name:%22{requests.utils.quote(species_name)}%22"
+                f"%20AND%20gene:{requests.utils.quote(str(g))}&format=json"
+            )
             try:
                 resp = requests.get(url, timeout=10)
                 if resp.status_code == 200:

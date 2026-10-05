@@ -60,12 +60,20 @@ class ReportGenerator:
         candidates = project_data.get("candidates", [])
         if candidates:
             for c in candidates:
+                boltz_val = c.get("boltz")
+                if boltz_val is None:
+                    boltz_val = f"[{c.get('boltz_status', 'NOT_AVAILABLE')}]"
+
+                gnina_val = c.get("gnina")
+                if gnina_val is None:
+                    gnina_val = f"[{c.get('gnina_status', 'NOT_AVAILABLE')}]"
+
                 cand_rows.append([
                     str(c.get("code", "N/A")),
                     str(c.get("target", "N/A")),
-                    str(c.get("boltz", "NOT_INSTALLED")),
-                    str(c.get("gnina", "NOT_INSTALLED")),
-                    str(c.get("selectivity", "N/A")),
+                    str(boltz_val),
+                    str(gnina_val),
+                    str(c.get("selectivity", "NOT_AVAILABLE")),
                     str(c.get("score", "N/A"))
                 ])
         else:
