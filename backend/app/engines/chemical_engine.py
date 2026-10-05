@@ -1,11 +1,12 @@
 import urllib.parse
 import requests
+import io
 from typing import Dict, Any, List, Optional
 from rdkit import Chem
 from rdkit.Chem import Descriptors, Lipinski, AllChem, rdMolDescriptors
 
 class ChemicalEngine:
-    """RDKit-powered chemical intelligence & Public API adapter (PubChem/ChEMBL)."""
+    """RDKit-powered chemical intelligence, PubChem/ChEMBL importer, and SDF/CSV parser."""
 
     @staticmethod
     def standardize_smiles(smiles: str) -> Optional[str]:
@@ -13,7 +14,7 @@ class ChemicalEngine:
             mol = Chem.MolFromSmiles(smiles)
             if mol is None:
                 return None
-            # Standardize & remove salts if any
+            Chem.SanitizeMol(mol)
             return Chem.MolToSmiles(mol, canonical=True)
         except Exception:
             return None
@@ -63,16 +64,16 @@ class ChemicalEngine:
 
     @staticmethod
     def fetch_pubchem_compound(query: str) -> Optional[Dict[str, Any]]:
-        """Fetch compound info from PubChem REST API."""
         try:
-            url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{urllib.parse.quote(query)}/property/CanonicalSMILES,MolecularWeight,MolecularFormula/JSON"
-            resp = requests.get(url, timeout=3)
+            url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{urllib.parse.quote(query)}/property/ConnectivitySMILES,CanonicalSMILES,MolecularWeight,MolecularFormula/JSON"
+            resp = requests.get(url, timeout=5)
             if resp.status_code == 200:
                 data = resp.json()
                 props = data["PropertyTable"]["Properties"][0]
+                smiles = props.get("ConnectivitySMILES") or props.get("CanonicalSMILES")
                 return {
                     "cid": str(props.get("CID")),
-                    "smiles": props.get("CanonicalSMILES"),
+                    "smiles": smiles,
                     "mw": props.get("MolecularWeight"),
                     "formula": props.get("MolecularFormula")
                 }
@@ -80,19 +81,34 @@ class ChemicalEngine:
             pass
         return None
 
+    @staticmethod
+    def parse_sdf_text(sdf_content: str) -> List[Dict[str, str]]:
+        compounds = []
+        try:
+            suppl = Chem.SDMolSupplier()
+            suppl.SetData(sdf_content)
+            for idx, mol in enumerate(suppl, 1):
+                if mol is not None:
+                    smiles = Chem.MolToSmiles(mol, canonical=True)
+                    name = mol.GetProp("_Name") if mol.HasProp("_Name") else f"SDF_Compound_{idx}"
+                    compounds.append({"code": f"SDF-{idx:04d}", "name": name, "smiles": smiles})
+        except Exception:
+            pass
+        return compounds
+
     def build_library(self, initial_compounds: List[Dict[str, str]]) -> List[Dict[str, Any]]:
-        """Build and filter a chemical library with RDKit descriptors."""
         processed = []
         for idx, comp in enumerate(initial_compounds, 1):
             smiles = comp.get("smiles", "")
             code = comp.get("code", f"MH-{idx:06d}")
             desc = self.calculate_descriptors(smiles)
             if desc:
+                sim = self.compute_tanimoto_similarity(smiles, "CC(=O)Oc1ccccc1C(=O)O")
                 processed.append({
                     "compound_code": code,
                     "name": comp.get("name", f"Compound-{idx}"),
                     "smiles": smiles,
                     **desc,
-                    "novelty_score": round(100.0 - (self.compute_tanimoto_similarity(smiles, "CC(=O)Oc1ccccc1C(=O)O") * 50), 1)
+                    "novelty_score": round(max(10.0, 100.0 - (sim * 80.0)), 1)
                 })
         return processed
