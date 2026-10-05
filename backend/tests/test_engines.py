@@ -69,6 +69,16 @@ def test_chemical_engine_deduplication():
     lib = ce.build_library(comps)
     assert len(lib) == 1
 
+def test_chemical_engine_advanced_filters():
+    ce = ChemicalEngine()
+    parent = ce.remove_salts_get_parent("CC(=O)O.Cl.[Na+]")
+    assert "Cl" not in parent
+
+    desc = ce.calculate_descriptors("CC(=O)Oc1ccccc1C(=O)O")
+    assert "veber_pass" in desc
+    assert "pains_pass" in desc
+    assert desc["veber_pass"] is True
+
 def test_consensus_engine_zero_parameters():
     me = MikHerbConsensusScoreEngine()
     score_res = me.calculate_score()

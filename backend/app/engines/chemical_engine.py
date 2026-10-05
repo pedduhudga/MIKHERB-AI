@@ -3,7 +3,11 @@ import requests
 import io
 from typing import Dict, Any, List, Optional
 from rdkit import Chem
-from rdkit.Chem import Descriptors, Lipinski, AllChem, rdMolDescriptors
+from rdkit.Chem import Descriptors, Lipinski, AllChem, rdMolDescriptors, FilterCatalog
+
+_pains_params = FilterCatalog.FilterCatalogParams()
+_pains_params.AddCatalog(FilterCatalog.FilterCatalogParams.FilterCatalogs.PAINS)
+PAINS_CATALOG = FilterCatalog.FilterCatalog(_pains_params)
 
 class ChemicalEngine:
     """RDKit-powered chemical intelligence, PubChem/ChEMBL importer, and SDF/CSV parser."""
@@ -29,8 +33,30 @@ class ChemicalEngine:
             return None
 
     @staticmethod
+    def remove_salts_get_parent(smiles: str) -> str:
+        try:
+            mol = Chem.MolFromSmiles(smiles)
+            if mol is None:
+                return smiles
+            frags = Chem.GetMolFrags(mol, asMols=True)
+            if not frags:
+                return smiles
+            parent = max(frags, key=lambda f: f.GetNumHeavyAtoms())
+            return Chem.MolToSmiles(parent, canonical=True)
+        except Exception:
+            return smiles
+
+    @staticmethod
+    def check_pains_filter(mol: Chem.Mol) -> bool:
+        try:
+            return not PAINS_CATALOG.HasMatch(mol)
+        except Exception:
+            return True
+
+    @staticmethod
     def calculate_descriptors(smiles: str) -> Optional[Dict[str, Any]]:
-        mol = Chem.MolFromSmiles(smiles)
+        parent_smiles = ChemicalEngine.remove_salts_get_parent(smiles)
+        mol = Chem.MolFromSmiles(parent_smiles)
         if mol is None:
             return None
 
@@ -42,6 +68,8 @@ class ChemicalEngine:
         rotatable = Lipinski.NumRotatableBonds(mol)
 
         lipinski_pass = (mw <= 500) and (logp <= 5) and (hbd <= 5) and (hba <= 10)
+        veber_pass = (rotatable <= 10) and (tpsa <= 140.0)
+        pains_pass = ChemicalEngine.check_pains_filter(mol)
 
         return {
             "canonical_smiles": Chem.MolToSmiles(mol, canonical=True),
@@ -51,7 +79,9 @@ class ChemicalEngine:
             "hba": hba,
             "tpsa": round(tpsa, 2),
             "rotatable_bonds": rotatable,
-            "lipinski_pass": lipinski_pass
+            "lipinski_pass": lipinski_pass,
+            "veber_pass": veber_pass,
+            "pains_pass": pains_pass
         }
 
     @staticmethod
