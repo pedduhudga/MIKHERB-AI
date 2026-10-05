@@ -304,7 +304,18 @@ class Boltz2Adapter:
 
         seq = protein_sequence or self.extract_sequence_from_pdb(protein_pdb_path)
         if not seq:
-            seq = "M"
+            return {
+                "engine": "Boltz-2 AI",
+                "status": "FAILED_INPUT",
+                "pIC50_predicted": None,
+                "pKd_predicted": None,
+                "affinity_raw_log_ic50_uM": None,
+                "affinity_probability_binary": None,
+                "boltz_confidence_score": None,
+                "boltz_complex_plddt": None,
+                "complex_confidence_pLDDT": None,
+                "error": "PROTEIN_SEQUENCE_MISSING: Valid protein amino acid sequence required for Boltz-2 input YAML."
+            }
 
         with tempfile.TemporaryDirectory() as tmpdir:
             yaml_path = os.path.join(tmpdir, "boltz_input.yaml")
@@ -330,7 +341,7 @@ class Boltz2Adapter:
                 if res.returncode == 0:
                     plddt = None
                     conf_score = None
-                    pkd = None
+                    pic50 = None
                     raw_log_ic50 = None
                     prob_binder = None
 
@@ -339,7 +350,7 @@ class Boltz2Adapter:
                         for f in files:
                             file_path = os.path.join(root, f)
 
-                            # 1. Parse confidence_*.json strictly
+                            # 1. Parse confidence_*.json strictly (native 0-1 scale)
                             if f.startswith("confidence") and f.endswith(".json"):
                                 try:
                                     with open(file_path, "r") as jf:
@@ -349,50 +360,49 @@ class Boltz2Adapter:
                                                 plddt = float(c_data["complex_plddt"])
                                             elif "plddt" in c_data:
                                                 plddt = float(c_data["plddt"])
-                                            elif "confidence_score" in c_data:
-                                                val = float(c_data["confidence_score"])
-                                                conf_score = val
-                                                plddt = val * 100.0 if val <= 1.0 else val
-                                            if "confidence_score" in c_data and conf_score is None:
+                                            if "confidence_score" in c_data:
                                                 conf_score = float(c_data["confidence_score"])
                                 except Exception:
                                     continue
 
-                            # 2. Parse affinity_*.json strictly
+                            # 2. Parse affinity_*.json strictly (documented Boltz-2 schema)
                             elif f.startswith("affinity") and f.endswith(".json"):
                                 try:
                                     with open(file_path, "r") as jf:
                                         a_data = json.load(jf)
                                         if isinstance(a_data, dict):
+                                            # Documented Boltz-2 metric: affinity_pred_value is log10(IC50 in µM)
                                             if "affinity_pred_value" in a_data:
-                                                # Documented Boltz-2 schema: log10(IC50 in µM)
                                                 raw_log_ic50 = float(a_data["affinity_pred_value"])
-                                                pkd = round(6.0 - raw_log_ic50, 2)
+                                                pic50 = round(6.0 - raw_log_ic50, 2)
                                             elif "affinity_pred_value1" in a_data:
                                                 v1 = float(a_data["affinity_pred_value1"])
                                                 v2 = float(a_data.get("affinity_pred_value2", v1))
                                                 raw_log_ic50 = (v1 + v2) / 2.0
-                                                pkd = round(6.0 - raw_log_ic50, 2)
-                                            elif "pKd" in a_data:
-                                                pkd = float(a_data["pKd"])
-                                                raw_log_ic50 = round(6.0 - pkd, 2)
+                                                pic50 = round(6.0 - raw_log_ic50, 2)
 
                                             if "affinity_probability_binary" in a_data:
                                                 prob_binder = float(a_data["affinity_probability_binary"])
                                 except Exception:
                                     continue
 
-                    if plddt is not None and pkd is not None:
-                        estimated_nm = round(10 ** (9 - float(pkd)), 1)
+                    if plddt is not None and pic50 is not None:
+                        estimated_ic50_nm = round(10 ** (9 - float(pic50)), 1)
+                        plddt_pct = round(plddt * 100.0, 1) if plddt <= 1.0 else round(plddt, 1)
                         return {
                             "engine": "Boltz-2 AI Native Executable",
-                            "pKd_predicted": round(float(pkd), 2),
-                            "estimated_affinity_nM": estimated_nm,
-                            "complex_confidence_pLDDT": round(float(plddt), 1),
-                            "affinity_metric": "log_ic50_uM",
+                            "pIC50_predicted": round(float(pic50), 2),
+                            "boltz_pIC50_predicted": round(float(pic50), 2),
+                            "pKd_predicted": round(float(pic50), 2),
+                            "predicted_ic50_equivalent_nM": estimated_ic50_nm,
+                            "estimated_affinity_nM": estimated_ic50_nm,
+                            "affinity_metric": "log10_uM_IC50",
                             "affinity_raw_log_ic50_uM": raw_log_ic50,
                             "affinity_probability_binary": prob_binder,
-                            "confidence_score": conf_score,
+                            "boltz_confidence_score": conf_score,
+                            "boltz_complex_plddt": plddt,
+                            "confidence_scale": "0_to_1",
+                            "complex_confidence_pLDDT": plddt_pct,
                             "execution_mode": "NATIVE_BINARY",
                             "status": "COMPLETED"
                         }
@@ -400,7 +410,9 @@ class Boltz2Adapter:
                     return {
                         "engine": "Boltz-2 AI Native Executable",
                         "status": "FAILED_OUTPUT_PARSE",
+                        "pIC50_predicted": None,
                         "pKd_predicted": None,
+                        "boltz_complex_plddt": None,
                         "complex_confidence_pLDDT": None,
                         "error": "Boltz-2 executed but required confidence_*.json or affinity_*.json fields were missing or invalid."
                     }
@@ -408,7 +420,9 @@ class Boltz2Adapter:
                     return {
                         "engine": "Boltz-2 AI Native Executable",
                         "status": "FAILED_EXECUTION",
+                        "pIC50_predicted": None,
                         "pKd_predicted": None,
+                        "boltz_complex_plddt": None,
                         "complex_confidence_pLDDT": None,
                         "error": res.stderr.strip() if res.stderr else f"Exit code {res.returncode}"
                     }
@@ -416,7 +430,9 @@ class Boltz2Adapter:
                 return {
                     "engine": "Boltz-2 AI Native Executable",
                     "status": "FAILED_EXECUTION",
+                    "pIC50_predicted": None,
                     "pKd_predicted": None,
+                    "boltz_complex_plddt": None,
                     "complex_confidence_pLDDT": None,
                     "error": str(e)
                 }
@@ -424,7 +440,9 @@ class Boltz2Adapter:
         return {
             "engine": "Boltz-2 AI Native Executable",
             "status": "FAILED_UNKNOWN",
+            "pIC50_predicted": None,
             "pKd_predicted": None,
+            "boltz_complex_plddt": None,
             "complex_confidence_pLDDT": None
         }
 

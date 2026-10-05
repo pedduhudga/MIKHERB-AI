@@ -468,10 +468,10 @@ def test_scientific_engine_lifecycle_tiers():
         assert status["installed"] is True
         assert status["validated"] is False
 
-        # 3. Successful validation -> VALIDATED
+        # 3. Successful validation -> SCIENTIFICALLY_VALIDATED
         with patch("subprocess.run", return_value=MagicMock(returncode=0, stdout="FakeTool v2.1.0\n", stderr="")):
             v_status = eng.validate()
-            assert v_status["status"] == "VALIDATED"
+            assert v_status["status"] == "SCIENTIFICALLY_VALIDATED"
             assert v_status["validated"] is True
             assert v_status["version"] == "FakeTool v2.1.0"
 
@@ -1144,9 +1144,11 @@ def test_boltz_strict_schema_documented_units_conversion(tmp_path):
          patch("subprocess.run", side_effect=mock_run):
         res = adapter.predict_complex(dummy_pdb, "CC(=O)O", [10.0, 10.0, 10.0])
         assert res["status"] == "COMPLETED"
-        assert res["pKd_predicted"] == 8.5  # 6.0 - (-2.5) = 8.5
+        assert res["pIC50_predicted"] == 8.5  # 6.0 - (-2.5) = 8.5
+        assert res["boltz_pIC50_predicted"] == 8.5
+        assert res["pKd_predicted"] == 8.5
         assert res["complex_confidence_pLDDT"] == 91.5
-        assert res["affinity_metric"] == "log_ic50_uM"
+        assert res["affinity_metric"] in ("log10_uM_IC50", "log_ic50_uM")
         assert res["affinity_raw_log_ic50_uM"] == -2.5
         assert res["affinity_probability_binary"] == 0.95
 
@@ -1177,5 +1179,244 @@ def test_engine_validation_tiers_probe_vs_scientific():
         sci_res = engine.scientific_validate()
         assert sci_res["status"] == "SCIENTIFICALLY_VALIDATED"
         assert sci_res["is_scientifically_validated"] is True
+
+
+# ===========================================================================
+# SCIENTIFIC INTEGRITY PASS REGRESSION TESTS
+# ===========================================================================
+
+def test_p2rank_csv_exact_xyz_coordinates(tmp_path):
+    """
+    Scientific Integrity: P2Rank CSV parser must parse by COLUMN NAME and correctly map:
+    center_x -> X, center_y -> Y, center_z -> Z.
+    Must NOT confuse probability with X.
+    """
+    from app.engines.protein_engine import P2RankAdapter
+    adapter = P2RankAdapter()
+
+    dummy_pdb = str(tmp_path / "target.pdb")
+    with open(dummy_pdb, "w") as f:
+        f.write("ATOM      1  CA  MET A   1      10.000  10.000  10.000  1.00 88.00           C\n")
+
+    def mock_p2rank(cmd, *args, **kwargs):
+        out_dir = cmd[cmd.index("-o") + 1]
+        csv_path = os.path.join(out_dir, f"{os.path.basename(dummy_pdb)}_predictions.csv")
+        with open(csv_path, "w") as f:
+            f.write("name,rank,score,probability,center_x,center_y,center_z\n")
+            f.write("pocket1,1,12.5,0.85,10.0,20.0,30.0\n")
+        return MagicMock(returncode=0, stdout="P2Rank completed", stderr="")
+
+    with patch("shutil.which", return_value="/usr/local/bin/p2rank"), \
+         patch("subprocess.run", side_effect=mock_p2rank):
+        pockets = adapter.predict_pockets(dummy_pdb)
+        assert len(pockets) == 1
+        pkt = pockets[0]
+        assert pkt["status"] == "COMPLETED"
+        # Exact coordinate mapping: center must be [10.0, 20.0, 30.0]
+        assert pkt["center"] == [10.0, 20.0, 30.0], f"Center was incorrectly parsed as {pkt['center']}"
+        assert pkt["score"] == 12.5
+        assert pkt["druggability_score"] == 0.85
+        assert pkt["probability"] == 0.85
+
+
+def test_p2rank_malformed_csv_returns_failed_output_parse(tmp_path):
+    """
+    Scientific Integrity: Malformed P2Rank CSV missing center coordinates or corrupt rows
+    must return FAILED_OUTPUT_PARSE instead of falling back to fake coordinates.
+    """
+    from app.engines.protein_engine import P2RankAdapter
+    adapter = P2RankAdapter()
+
+    dummy_pdb = str(tmp_path / "target.pdb")
+    with open(dummy_pdb, "w") as f:
+        f.write("ATOM      1  CA  MET A   1      10.000  10.000  10.000  1.00 88.00           C\n")
+
+    def mock_malformed_csv(cmd, *args, **kwargs):
+        out_dir = cmd[cmd.index("-o") + 1]
+        csv_path = os.path.join(out_dir, f"{os.path.basename(dummy_pdb)}_predictions.csv")
+        with open(csv_path, "w") as f:
+            # Missing center_z column!
+            f.write("name,rank,score,probability,center_x,center_y\n")
+            f.write("pocket1,1,12.5,0.85,10.0,20.0\n")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with patch("shutil.which", return_value="/usr/local/bin/p2rank"), \
+         patch("subprocess.run", side_effect=mock_malformed_csv):
+        pockets = adapter.predict_pockets(dummy_pdb)
+        assert len(pockets) == 1
+        assert pockets[0]["status"] == "FAILED_OUTPUT_PARSE"
+        assert pockets[0]["center"] is None
+
+
+def test_p2rank_installed_execution_failure(tmp_path):
+    """
+    Scientific Integrity: When P2Rank is installed but executable fails (non-zero return code),
+    must report FAILED_EXECUTION and not disguise as success or surrogate.
+    """
+    from app.engines.protein_engine import P2RankAdapter
+    adapter = P2RankAdapter()
+
+    dummy_pdb = str(tmp_path / "target.pdb")
+    with open(dummy_pdb, "w") as f:
+        f.write("ATOM      1  CA  MET A   1      10.000  10.000  10.000  1.00 88.00           C\n")
+
+    with patch("shutil.which", return_value="/usr/local/bin/p2rank"), \
+         patch("subprocess.run", return_value=MagicMock(returncode=1, stdout="", stderr="Java heap space out of memory")):
+        pockets = adapter.predict_pockets(dummy_pdb)
+        assert len(pockets) == 1
+        assert pockets[0]["status"] == "FAILED_EXECUTION"
+        assert "Java heap space" in pockets[0]["error"]
+        assert pockets[0]["center"] is None
+
+
+def test_api_unavailable_returns_failed_scientific_validation():
+    """
+    Scientific Integrity: External API failure (UniProt, AlphaFold, PubChem) must NEVER
+    return True / SCIENTIFICALLY_VALIDATED. Network failure MUST produce FAILED.
+    """
+    import requests
+    from app.engines.base import BaseScientificEngine
+    from app.engines.status_manager import _validate_uniprot, _validate_alphafold, _validate_pubchem
+
+    with patch("requests.get", side_effect=requests.exceptions.ConnectionError("Network down")):
+        # Direct function calls must return False
+        assert _validate_uniprot() is False
+        assert _validate_alphafold() is False
+        assert _validate_pubchem() is False
+
+        # In BaseScientificEngine lifecycle, must result in FAILED status
+        u_eng = BaseScientificEngine("UniProt REST API", is_api=True, scientific_validator=_validate_uniprot)
+        res = u_eng.scientific_validate()
+        assert res["status"] == "FAILED"
+        assert res["scientifically_validated"] is False
+        assert res["validated"] is False
+        assert "failed or service unreachable" in res["validation_error"]
+
+
+def test_validation_success_followed_by_failure_resets_state():
+    """
+    Engine Lifecycle: A previous successful validation followed by a failed validation
+    MUST completely reset previous state and report status = FAILED.
+    """
+    from app.engines.base import BaseScientificEngine
+
+    validator_state = {"should_succeed": True}
+
+    def dynamic_validator():
+        return validator_state["should_succeed"]
+
+    eng = BaseScientificEngine(
+        name="Dynamic Test Engine",
+        binary_name="dynamic_bin",
+        validation_args=["--version"],
+        scientific_validator=dynamic_validator
+    )
+
+    with patch("shutil.which", return_value="/usr/bin/dynamic_bin"), \
+         patch("subprocess.run", return_value=MagicMock(returncode=0, stdout="dynamic_bin v1.0")):
+        # 1. First run: succeeds
+        first_status = eng.scientific_validate()
+        assert first_status["status"] == "SCIENTIFICALLY_VALIDATED"
+        assert first_status["validated"] is True
+        assert first_status["scientifically_validated"] is True
+
+        # 2. Second run: scientific validation fails
+        validator_state["should_succeed"] = False
+        second_status = eng.scientific_validate()
+        assert second_status["status"] == "FAILED"
+        assert second_status["validated"] is False
+        assert second_status["scientifically_validated"] is False
+        assert second_status["probe_validated"] is False
+        assert second_status["validation_error"] is not None
+
+
+def test_boltz_pic50_naming_and_conversion(tmp_path):
+    """
+    Scientific Integrity: Boltz-2 documented affinity_pred_value (log10 µM) must be stored
+    as affinity_raw_log_ic50_uM and converted to pIC50_predicted = 6.0 - affinity_pred_value.
+    Must clearly label predicted IC50 equivalent, not measured affinity.
+    """
+    import json
+    from app.engines.docking_engine import Boltz2Adapter
+    adapter = Boltz2Adapter()
+
+    dummy_pdb = str(tmp_path / "target.pdb")
+    with open(dummy_pdb, "w") as f:
+        f.write("ATOM      1  CA  MET A   1      10.000  10.000  10.000  1.00 88.00           C\n")
+
+    def mock_run(cmd, *args, **kwargs):
+        out_dir = cmd[cmd.index("--out_dir") + 1]
+        with open(os.path.join(out_dir, "confidence_model_0.json"), "w") as f:
+            json.dump({"complex_plddt": 0.88, "confidence_score": 0.85}, f)
+        with open(os.path.join(out_dir, "affinity_model_0.json"), "w") as f:
+            json.dump({"affinity_pred_value": -1.5, "affinity_probability_binary": 0.92}, f)
+        return MagicMock(returncode=0)
+
+    with patch("shutil.which", return_value="/usr/local/bin/boltz"), \
+         patch("subprocess.run", side_effect=mock_run):
+        res = adapter.predict_complex(dummy_pdb, "CCO", [10.0, 10.0, 10.0], protein_sequence="MKVLA")
+        assert res["status"] == "COMPLETED"
+        assert res["affinity_raw_log_ic50_uM"] == -1.5
+        assert res["affinity_metric"] == "log10_uM_IC50"
+        # 6.0 - (-1.5) = 7.5
+        assert res["pIC50_predicted"] == 7.5
+        assert res["boltz_pIC50_predicted"] == 7.5
+        assert res["affinity_probability_binary"] == 0.92
+        # IC50 equivalent in nM: 10^(9 - 7.5) = 10^1.5 = 31.6 nM
+        assert res["predicted_ic50_equivalent_nM"] == 31.6
+
+
+def test_boltz_native_confidence_scale_0_to_1(tmp_path):
+    """
+    Scientific Integrity: Boltz confidence metrics must be preserved in native 0-1 scale.
+    Must not mutate 0.91 -> 91 in backend storage metrics.
+    """
+    import json
+    from app.engines.docking_engine import Boltz2Adapter
+    adapter = Boltz2Adapter()
+
+    dummy_pdb = str(tmp_path / "target.pdb")
+    with open(dummy_pdb, "w") as f:
+        f.write("ATOM      1  CA  MET A   1      10.000  10.000  10.000  1.00 88.00           C\n")
+
+    def mock_run(cmd, *args, **kwargs):
+        out_dir = cmd[cmd.index("--out_dir") + 1]
+        with open(os.path.join(out_dir, "confidence_model_0.json"), "w") as f:
+            json.dump({"complex_plddt": 0.925, "confidence_score": 0.91}, f)
+        with open(os.path.join(out_dir, "affinity_model_0.json"), "w") as f:
+            json.dump({"affinity_pred_value": -2.0, "affinity_probability_binary": 0.96}, f)
+        return MagicMock(returncode=0)
+
+    with patch("shutil.which", return_value="/usr/local/bin/boltz"), \
+         patch("subprocess.run", side_effect=mock_run):
+        res = adapter.predict_complex(dummy_pdb, "CCO", [10.0, 10.0, 10.0], protein_sequence="MKVLA")
+        assert res["status"] == "COMPLETED"
+        assert res["boltz_confidence_score"] == 0.91
+        assert res["boltz_complex_plddt"] == 0.925
+        assert res["confidence_scale"] == "0_to_1"
+        assert res["complex_confidence_pLDDT"] == 92.5  # presentation percentage
+
+
+def test_boltz_missing_protein_sequence_returns_failed_input(tmp_path):
+    """
+    Scientific Integrity: Missing protein sequence must return FAILED_INPUT
+    and NEVER inject fake sequence 'M'.
+    """
+    from app.engines.docking_engine import Boltz2Adapter
+    adapter = Boltz2Adapter()
+
+    # Empty PDB without sequence
+    empty_pdb = str(tmp_path / "empty.pdb")
+    with open(empty_pdb, "w") as f:
+        f.write("REMARK   Empty test structure\n")
+
+    with patch("shutil.which", return_value="/usr/local/bin/boltz"):
+        res = adapter.predict_complex(empty_pdb, "CCO", [10.0, 10.0, 10.0], protein_sequence=None)
+        assert res["status"] == "FAILED_INPUT"
+        assert "PROTEIN_SEQUENCE_MISSING" in res["error"]
+        assert res["pIC50_predicted"] is None
+        assert res["pKd_predicted"] is None
+        assert res["boltz_complex_plddt"] is None
+
 
 

@@ -17,3 +17,17 @@ def get_db():
         yield db
     finally:
         db.close()
+
+def migrate_legacy_unowned_projects(db, default_owner_uid: str = "legacy_migrated_owner") -> int:
+    """
+    Migration helper: Backfills null owner_uid on legacy projects so that owner_uid
+    can be transitioned to nullable=False in database schema.
+    """
+    from app.models.models import Project
+    count = db.query(Project).filter(Project.owner_uid.is_(None)).update(
+        {Project.owner_uid: default_owner_uid},
+        synchronize_session=False
+    )
+    db.commit()
+    return count
+

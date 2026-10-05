@@ -102,10 +102,9 @@ def verify_project_ownership(project: Any, current_user: Optional[Dict[str, Any]
         )
 
     user_uid = current_user.get("uid")
-    # If the project is owned by a specific Firebase UID, enforce strict match
     project_owner = getattr(project, "owner_uid", None)
-    if project_owner and user_uid and user_uid != "local_dev_user":
-        if project_owner != user_uid:
+    if user_uid and user_uid != "local_dev_user":
+        if not project_owner or project_owner != user_uid:
             raise HTTPException(
                 status_code=403,
                 detail=f"Forbidden: You do not have ownership access to project {getattr(project, 'id', 'unknown')}"

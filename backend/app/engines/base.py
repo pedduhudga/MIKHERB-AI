@@ -44,11 +44,19 @@ class BaseScientificEngine:
             return True
         return True
 
+    def reset_validation(self):
+        """Resets all transient validation flags before a new validation attempt."""
+        self._probe_validated = False
+        self._scientifically_validated = False
+        self._validation_error = None
+        self._scientific_summary = None
+
     def probe_validate(self) -> Dict[str, Any]:
         """
         Executes a basic binary/library probe (--version / --help / import) to confirm
         the executable exists and responds without crashing.
         """
+        self.reset_validation()
         installed = self.is_installed()
         if not installed:
             self._probe_validated = False
@@ -96,41 +104,42 @@ class BaseScientificEngine:
         Executes a scientific workflow verification (known fixture -> output parser check)
         to confirm the engine produces scientifically valid and parseable results.
         """
+        self.reset_validation()
         installed = self.is_installed()
         if not installed:
             self._scientifically_validated = False
             self._validation_error = f"{self.name} is not installed."
             return self.get_status()
 
-        if not self._probe_validated:
-            self.probe_validate()
-            if self._validation_error:
-                return self.get_status()
+        # Step 1: Probe validation
+        probe_res = self.probe_validate()
+        if not self._probe_validated or self._validation_error:
+            return self.get_status()
 
+        # Step 2: Scientific workflow validation
         if self.scientific_validator:
             try:
                 res = self.scientific_validator()
                 if res:
                     self._scientifically_validated = True
+                    self._validation_error = None
                     self._scientific_summary = "Scientific validation workflow passed"
                 else:
                     self._scientifically_validated = False
-                    self._validation_error = f"{self.name} scientific validation workflow failed."
+                    self._validation_error = f"{self.name} scientific validation workflow failed or service unreachable."
             except Exception as e:
                 self._scientifically_validated = False
                 self._validation_error = f"Scientific validation exception: {e}"
         else:
             self._scientifically_validated = True
+            self._validation_error = None
             self._scientific_summary = "Default self-test passed"
 
         return self.get_status()
 
     def validate(self) -> Dict[str, Any]:
-        """Runs probe validation followed by scientific validation."""
-        self.probe_validate()
-        if self._probe_validated:
-            return self.scientific_validate()
-        return self.get_status()
+        """Runs probe validation followed by scientific validation. Resets state on each run."""
+        return self.scientific_validate()
 
     def get_status(self) -> Dict[str, Any]:
         installed = self.is_installed()
@@ -155,13 +164,18 @@ class BaseScientificEngine:
         if not installed:
             execution_mode = "SURROGATE_HEURISTIC_AVAILABLE"
 
+        is_valid = (status in ("PROBE_VALIDATED", "SCIENTIFICALLY_VALIDATED")) and (self._validation_error is None)
+
         return {
             "name": self.name,
             "installed": installed,
+            "is_installed": installed,
             "executable": executable,
-            "probe_validated": self._probe_validated,
-            "scientifically_validated": self._scientifically_validated,
-            "validated": self._scientifically_validated or self._probe_validated,
+            "probe_validated": self._probe_validated and self._validation_error is None,
+            "is_probe_validated": self._probe_validated and self._validation_error is None,
+            "scientifically_validated": self._scientifically_validated and self._validation_error is None,
+            "is_scientifically_validated": self._scientifically_validated and self._validation_error is None,
+            "validated": is_valid,
             "binary_name": self.binary_name,
             "status": status,
             "execution_mode": execution_mode,

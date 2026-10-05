@@ -99,25 +99,36 @@ class P2RankPocketPredictor:
                     "error": f"P2Rank completed with exit code 0 but predictions CSV was not found: {predictions_csv}"
                 }]
 
+            import csv
             pockets = []
             try:
                 with open(predictions_csv, "r") as f:
-                    lines = f.readlines()
-                    for idx, line in enumerate(lines[1:], 1):
-                        parts = line.strip().split(",")
-                        if len(parts) >= 6:
-                            try:
-                                pockets.append({
-                                    "pocket_id": idx,
-                                    "name": f"P2Rank Native Predicted Pocket {idx}",
-                                    "center": [float(parts[3]), float(parts[4]), float(parts[5])],
-                                    "score": float(parts[1]),
-                                    "druggability_score": float(parts[2]),
-                                    "source": "P2Rank Native Binary",
-                                    "status": "COMPLETED"
-                                })
-                            except (ValueError, IndexError):
-                                continue
+                    reader = csv.DictReader(f)
+                    if reader.fieldnames:
+                        reader.fieldnames = [fn.strip().lower() for fn in reader.fieldnames if fn]
+
+                    for idx, row in enumerate(reader, 1):
+                        row_clean = {k.strip().lower(): v.strip() for k, v in row.items() if k and v}
+                        if not all(col in row_clean for col in ["center_x", "center_y", "center_z"]):
+                            continue
+                        try:
+                            cx = float(row_clean["center_x"])
+                            cy = float(row_clean["center_y"])
+                            cz = float(row_clean["center_z"])
+                            score = float(row_clean["score"]) if "score" in row_clean else None
+                            prob = float(row_clean["probability"]) if "probability" in row_clean else None
+                            pockets.append({
+                                "pocket_id": idx,
+                                "name": row_clean.get("name", f"P2Rank Native Predicted Pocket {idx}"),
+                                "center": [round(cx, 3), round(cy, 3), round(cz, 3)],
+                                "score": score,
+                                "druggability_score": prob,
+                                "probability": prob,
+                                "source": "P2Rank Native Binary",
+                                "status": "COMPLETED"
+                            })
+                        except (ValueError, TypeError):
+                            continue
             except Exception as e:
                 return [{
                     "pocket_id": 1,

@@ -118,9 +118,7 @@ def list_projects(
 ):
     user_uid = current_user.get("uid") if current_user else None
     if user_uid and user_uid != "local_dev_user":
-        return db.query(Project).filter(
-            (Project.owner_uid == user_uid) | (Project.owner_uid == None)
-        ).all()
+        return db.query(Project).filter(Project.owner_uid == user_uid).all()
     return db.query(Project).all()
 
 @app.get("/api/v1/projects/{project_id}", response_model=ProjectResponse)

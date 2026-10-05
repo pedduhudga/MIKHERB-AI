@@ -215,8 +215,8 @@ def test_system_engines_validate_endpoint():
     data = resp.json()
     assert "rdkit" in data
     assert "gnina" in data
-    assert "boltz" in data
-    assert data["rdkit"]["status"] in ("SCIENTIFICALLY_VALIDATED", "PROBE_VALIDATED", "VALIDATED", "INSTALLED")
+    assert data["rdkit"]["status"] in ("SCIENTIFICALLY_VALIDATED", "PROBE_VALIDATED", "INSTALLED")
+
 
 
 def test_firebase_auth_production_default(monkeypatch):
@@ -267,5 +267,65 @@ def test_configurable_downstream_target_count():
     get_resp = client.get(f"/api/v1/projects/{data['id']}")
     assert get_resp.status_code == 200
     assert get_resp.json()["downstream_target_count"] == 5
+
+
+def test_strict_project_ownership_no_null_exposure():
+    """
+    Security Regression Test:
+    Authenticated users must NEVER receive unowned/legacy projects (owner_uid == NULL)
+    or projects owned by another user.
+    """
+    from app.db.database import SessionLocal
+    from app.models.models import Project
+
+    db = SessionLocal()
+    p_user_a = Project(
+        name="User A Project",
+        owner_uid="user_a_123",
+        weed_species="Palmer Amaranth",
+        crop_species="Soybean",
+        objective="new_herbicide"
+    )
+    p_user_b = Project(
+        name="User B Project",
+        owner_uid="user_b_456",
+        weed_species="Barnyard Grass",
+        crop_species="Rice",
+        objective="new_herbicide"
+    )
+    p_unowned = Project(
+        name="Legacy Unowned Project",
+        owner_uid=None,
+        weed_species="Kochia",
+        crop_species="Wheat",
+        objective="new_herbicide"
+    )
+    db.add_all([p_user_a, p_user_b, p_unowned])
+    db.commit()
+    db.refresh(p_user_a)
+    db.refresh(p_user_b)
+    db.refresh(p_unowned)
+
+    headers_a = {"Authorization": "Bearer test_token_user_a_123"}
+    resp = client.get("/api/v1/projects", headers=headers_a)
+    assert resp.status_code == 200
+    returned_projects = resp.json()
+    returned_ids = [p["id"] for p in returned_projects]
+
+    assert p_user_a.id in returned_ids
+    assert p_user_b.id not in returned_ids
+    assert p_unowned.id not in returned_ids, "Unowned projects (owner_uid == NULL) must NEVER be exposed to authenticated users"
+
+    # User A attempting to directly GET unowned project must be forbidden (403)
+    get_unowned_resp = client.get(f"/api/v1/projects/{p_unowned.id}", headers=headers_a)
+    assert get_unowned_resp.status_code == 403
+
+    # Clean up test rows
+    db.delete(p_user_a)
+    db.delete(p_user_b)
+    db.delete(p_unowned)
+    db.commit()
+    db.close()
+
 
 

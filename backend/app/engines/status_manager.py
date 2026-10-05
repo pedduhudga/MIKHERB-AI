@@ -14,52 +14,76 @@ def _validate_rdkit() -> bool:
         return False
 
 def _validate_gnina() -> bool:
-    # Scientific validator verifies output parser logic on realistic output SDF fixture
-    sample_sdf = "\n> <minimizedAffinity>\n-8.5\n> <CNNscore>\n0.88\n$$$$\n"
-    return "minimizedAffinity" in sample_sdf and "CNNscore" in sample_sdf
+    import shutil, tempfile, os
+    gnina_bin = shutil.which("gnina")
+    if not gnina_bin:
+        return False
+    try:
+        from app.engines.docking_engine import GNINAAdapter
+        adapter = GNINAAdapter()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dummy_pdb = os.path.join(tmpdir, "fixture.pdb")
+            with open(dummy_pdb, "w") as f:
+                f.write("ATOM      1  CA  MET A   1      10.000  10.000  10.000  1.00 88.00           C\n")
+            res = adapter.dock(dummy_pdb, "CCO", [10.0, 10.0, 10.0], [15.0, 15.0, 15.0])
+            return res.get("status") == "COMPLETED" and res.get("cnn_score") is not None
+    except Exception:
+        return False
 
 def _validate_boltz() -> bool:
-    # Scientific validator verifies output parser logic on documented Boltz-2 schema
-    import json
+    import shutil, subprocess
+    boltz_bin = shutil.which("boltz")
+    if not boltz_bin:
+        return False
     try:
-        conf = json.loads('{"complex_plddt": 92.5, "confidence_score": 0.91}')
-        aff = json.loads('{"affinity_pred_value": -2.5, "affinity_probability_binary": 0.94}')
-        return "complex_plddt" in conf and "affinity_pred_value" in aff
+        res = subprocess.run([boltz_bin, "--help"], capture_output=True, text=True, timeout=10)
+        return res.returncode == 0
     except Exception:
         return False
 
 def _validate_p2rank() -> bool:
-    # Scientific validator verifies P2Rank CSV output parsing
-    sample_csv = "name,rank,score,probability,center_x,center_y,center_z\npocket1,1,12.5,0.85,10.0,20.0,30.0\n"
-    lines = sample_csv.strip().split("\n")
-    if len(lines) >= 2:
-        parts = lines[1].split(",")
-        return len(parts) >= 6
-    return False
+    import shutil, tempfile, os
+    p2rank_bin = shutil.which("p2rank")
+    if not p2rank_bin:
+        return False
+    try:
+        from app.engines.protein_engine import P2RankAdapter
+        adapter = P2RankAdapter()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dummy_pdb = os.path.join(tmpdir, "fixture.pdb")
+            with open(dummy_pdb, "w") as f:
+                f.write("ATOM      1  CA  MET A   1      10.000  10.000  10.000  1.00 88.00           C\n")
+            res = adapter.predict_pockets(dummy_pdb)
+            if isinstance(res, list) and len(res) > 0:
+                first = res[0]
+                return first.get("status") == "COMPLETED" or (first.get("status") not in ("FAILED_EXECUTION", "FAILED_OUTPUT_PARSE"))
+            return False
+    except Exception:
+        return False
 
 def _validate_uniprot() -> bool:
     import requests
     try:
-        r = requests.get("https://rest.uniprot.org/uniprotkb/P10324.fasta", timeout=4)
+        r = requests.get("https://rest.uniprot.org/uniprotkb/P10324.fasta", timeout=5)
         return r.status_code == 200
     except Exception:
-        return True
+        return False
 
 def _validate_alphafold() -> bool:
     import requests
     try:
-        r = requests.get("https://alphafold.ebi.ac.uk/api/prediction/P10324", timeout=4)
-        return r.status_code in (200, 404)
+        r = requests.get("https://alphafold.ebi.ac.uk/api/prediction/P10324", timeout=5)
+        return r.status_code == 200
     except Exception:
-        return True
+        return False
 
 def _validate_pubchem() -> bool:
     import requests
     try:
-        r = requests.get("https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/2244/property/MolecularWeight/JSON", timeout=4)
+        r = requests.get("https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/2244/property/MolecularWeight/JSON", timeout=5)
         return r.status_code == 200
     except Exception:
-        return True
+        return False
 
 class EngineStatusManager:
     """Manages system-wide transparency and two-phase (probe & scientific) validation for engines."""

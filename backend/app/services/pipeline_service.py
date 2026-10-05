@@ -492,8 +492,10 @@ class DiscoveryPipelineRunner:
                         "compound_code": comp.compound_code,
                         "smiles": comp.smiles,
                         "boltz_status": res["boltz"].get("status"),
-                        "boltz_pKd": res["boltz"].get("pKd_predicted"),
+                        "boltz_pIC50": res["boltz"].get("pIC50_predicted") or res["boltz"].get("pKd_predicted"),
+                        "boltz_pKd": res["boltz"].get("pIC50_predicted") or res["boltz"].get("pKd_predicted"),
                         "boltz_confidence": res["boltz"].get("complex_confidence_pLDDT"),
+                        "boltz_native_confidence": res["boltz"].get("boltz_confidence_score"),
                         "gnina_status": res["gnina"].get("status"),
                         "gnina_affinity": res["gnina"].get("affinity_kcal_mol"),
                         "gnina_cnn": res["gnina"].get("cnn_score"),
@@ -730,7 +732,7 @@ class DiscoveryPipelineRunner:
 
                 if primary_dock:
                     # Use stored Stage 4 scientific output — NO re-execution
-                    boltz_pKd = primary_dock.get("boltz_pKd")
+                    boltz_pKd = primary_dock.get("boltz_pIC50") or primary_dock.get("boltz_pKd")
                     boltz_conf = primary_dock.get("boltz_confidence")
                     boltz_actual_status = primary_dock.get("boltz_status", "NOT_AVAILABLE")
                     gnina_cnn = primary_dock.get("gnina_cnn")
@@ -742,7 +744,7 @@ class DiscoveryPipelineRunner:
                     weed_dock = self.docking_engine.screen_candidate(
                         weed_pdb_path, comp.smiles, weed_pocket_center, protein_sequence=target.weed_sequence
                     )
-                    boltz_pKd = weed_dock["boltz"].get("pKd_predicted") if weed_dock["boltz"].get("status") == "COMPLETED" else None
+                    boltz_pKd = (weed_dock["boltz"].get("pIC50_predicted") or weed_dock["boltz"].get("pKd_predicted")) if weed_dock["boltz"].get("status") == "COMPLETED" else None
                     boltz_conf = weed_dock["boltz"].get("complex_confidence_pLDDT") if weed_dock["boltz"].get("status") == "COMPLETED" else None
                     gnina_cnn = weed_dock["gnina"].get("cnn_score") if weed_dock["gnina"].get("status") == "COMPLETED" else None
                     gnina_aff = weed_dock["gnina"].get("affinity_kcal_mol") if weed_dock["gnina"].get("status") == "COMPLETED" else None
