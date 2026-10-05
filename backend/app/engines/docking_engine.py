@@ -81,16 +81,16 @@ class RDKitShapeBindingEngine:
         affinity_kcal = round(-5.0 + steric_term + hydrophobic_term + rotatable_penalty, 2)
         affinity_kcal = max(-14.0, min(-3.0, affinity_kcal))
 
-        pKd = round(abs(affinity_kcal) / 1.363, 2)
         confidence = round(min(95.0, max(60.0, 70.0 + (contact_count * 0.5))), 1)
+        heuristic_score = round(min(100.0, max(0.0, 50.0 + (affinity_kcal * -3.0))), 1)
 
         return {
             "engine": "RDKit 3D Conformer Steric Complementarity (Surrogate)",
-            "affinity_kcal_mol": affinity_kcal,
-            "pKd_predicted": pKd,
+            "surrogate_heuristic_score": heuristic_score,
             "contacts_in_pocket": contact_count,
             "confidence": confidence,
             "execution_mode": "OPEN_SOURCE_RDKIT_3D_SURROGATE",
+            "scientific_evidence": False,
             "status": "COMPLETED"
         }
 

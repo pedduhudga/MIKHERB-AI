@@ -362,15 +362,17 @@ class DiscoveryPipelineRunner:
             for comp in compounds:
                 logkoc = round(0.81 * (comp.logp or 2.0) + 0.10, 2) if comp.logp is not None else None
                 aquatic_mobility = ("HIGH" if logkoc < 2.0 else "MODERATE") if logkoc is not None else "UNKNOWN"
-                safety_clean = (aquatic_mobility != "HIGH") and comp.lipinski_pass
                 safety_records.append({
                     "compound_code": comp.compound_code,
+                    "safety_status": "PREDICTIVE_SCREEN_ONLY",
+                    "experimental_safety": "UNKNOWN_REQUIRES_ASSAY",
                     "mammalian_toxicity": "UNKNOWN_REQUIRES_ASSAY",
-                    "aquatic_mobility_LogKoc": logkoc,
-                    "aquatic_mobility_class": aquatic_mobility,
                     "bee_pollinator_concern": "UNKNOWN_NO_PUBLIC_ALERT",
-                    "known_pesticide_similarity": round(comp.novelty_score, 1) if comp.novelty_score is not None else None,
-                    "safety_clean": safety_clean
+                    "aquatic_mobility_LogKoc_prediction": logkoc,
+                    "aquatic_mobility_class": aquatic_mobility,
+                    "structural_dissimilarity": round(comp.novelty_score, 1) if comp.novelty_score is not None else None,
+                    "evidence_level": "PREDICTED_HEURISTIC",
+                    "safety_clean": (aquatic_mobility != "HIGH") and comp.lipinski_pass
                 })
             return {"safety_screened": len(compounds), "safety_records": safety_records}
 
@@ -412,10 +414,10 @@ class DiscoveryPipelineRunner:
 
                 p_conf = target.pockets_json[0].get("plddt_avg") if (is_weed_p2rank and target.pockets_json) else None
 
-                plddt_val = (target.structure_confidence or 70.0) if target else 70.0
-                crop_div_val = (target.crop_divergence_score or 50.0) if target else 50.0
-                essentiality_val = (target.essentiality_score or 50.0) if target else 50.0
-                dyn_target_relevance = round(min(100.0, max(10.0, (plddt_val * 0.4) + (crop_div_val * 0.3) + (essentiality_val * 0.3))), 1)
+                if target and target.structure_confidence is not None and target.crop_divergence_score is not None and target.essentiality_score is not None:
+                    dyn_target_relevance = round(min(100.0, max(0.0, (target.structure_confidence * 0.4) + (target.crop_divergence_score * 0.3) + (target.essentiality_score * 0.3))), 1)
+                else:
+                    dyn_target_relevance = None
 
                 consensus = self.consensus_engine.calculate_score(
                     target_relevance=dyn_target_relevance,

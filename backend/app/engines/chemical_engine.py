@@ -134,7 +134,13 @@ class ChemicalEngine:
             pass
         return compounds
 
-    def build_library(self, initial_compounds: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+    def build_library(
+        self,
+        initial_compounds: List[Dict[str, str]],
+        filter_pains: bool = True,
+        filter_lipinski: bool = False,
+        filter_veber: bool = False
+    ) -> List[Dict[str, Any]]:
         processed = []
         seen_smiles = set()
         for idx, comp in enumerate(initial_compounds, 1):
@@ -143,25 +149,35 @@ class ChemicalEngine:
             std_smiles = self.standardize_smiles(smiles)
             if not std_smiles or std_smiles in seen_smiles:
                 continue
-            seen_smiles.add(std_smiles)
 
             desc = self.calculate_descriptors(std_smiles)
-            if desc:
-                max_sim = 0.0
-                for ref_smiles in self.REFERENCE_HERBICIDES.values():
-                    sim = self.compute_tanimoto_similarity(std_smiles, ref_smiles)
-                    if sim > max_sim:
-                        max_sim = sim
+            if not desc:
+                continue
 
-                struct_dissim = round(max(0.0, min(100.0, (1.0 - max_sim) * 100.0)), 1)
+            if filter_pains and not desc.get("pains_pass", True):
+                continue
+            if filter_lipinski and not desc.get("lipinski_pass", True):
+                continue
+            if filter_veber and not desc.get("veber_pass", True):
+                continue
 
-                processed.append({
-                    "compound_code": code,
-                    "name": comp.get("name", f"Compound-{idx}"),
-                    "smiles": std_smiles,
-                    **desc,
-                    "max_tanimoto_reference_similarity": max_sim,
-                    "structural_dissimilarity_score": struct_dissim,
-                    "novelty_score": round(max(10.0, 100.0 - (max_sim * 80.0)), 1)
-                })
+            seen_smiles.add(std_smiles)
+
+            max_sim = 0.0
+            for ref_smiles in self.REFERENCE_HERBICIDES.values():
+                sim = self.compute_tanimoto_similarity(std_smiles, ref_smiles)
+                if sim > max_sim:
+                    max_sim = sim
+
+            struct_dissim = round(max(0.0, min(100.0, (1.0 - max_sim) * 100.0)), 1)
+
+            processed.append({
+                "compound_code": code,
+                "name": comp.get("name", f"Compound-{idx}"),
+                "smiles": std_smiles,
+                **desc,
+                "max_tanimoto_reference_similarity": max_sim,
+                "structural_dissimilarity_score": struct_dissim,
+                "novelty_score": struct_dissim
+            })
         return processed

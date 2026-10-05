@@ -121,7 +121,7 @@ class P2RankPocketPredictor:
         pockets = [
             {
                 "pocket_id": 1,
-                "name": "PDB Atom Centroid Geometry (P2Rank Binary Not Installed)",
+                "name": "Heuristic Geometric Site — P2Rank Not Installed",
                 "center": [round(c_x, 3), round(c_y, 3), round(c_z, 3)],
                 "score": None,
                 "plddt_avg": round(avg_plddt, 1) if avg_plddt else None,
@@ -143,17 +143,19 @@ class ProteinEngine:
         self.pocket_predictor = P2RankPocketPredictor()
 
     @staticmethod
-    def search_uniprot_accession(species_name: str, target_gene: str = "ALS") -> Optional[str]:
-        """Dynamically queries UniProt REST API for a given species and target gene."""
-        url = f"https://rest.uniprot.org/uniprotkb/search?query=organism_name:%22{requests.utils.quote(species_name)}%22%20AND%20gene:{requests.utils.quote(target_gene)}&format=json"
-        try:
-            resp = requests.get(url, timeout=10)
-            if resp.status_code == 200:
-                results = resp.json().get("results", [])
-                if results:
-                    return results[0].get("primaryAccession")
-        except Exception:
-            pass
+    def search_uniprot_accession(species_name: str, target_gene: Any = "ALS") -> Optional[str]:
+        """Dynamically queries UniProt REST API for a given species and target gene or gene list."""
+        genes = [target_gene] if isinstance(target_gene, str) else list(target_gene)
+        for g in genes:
+            url = f"https://rest.uniprot.org/uniprotkb/search?query=organism_name:%22{requests.utils.quote(species_name)}%22%20AND%20gene:{requests.utils.quote(str(g))}&format=json"
+            try:
+                resp = requests.get(url, timeout=10)
+                if resp.status_code == 200:
+                    results = resp.json().get("results", [])
+                    if results:
+                        return results[0].get("primaryAccession")
+            except Exception:
+                pass
         return None
 
     def fetch_uniprot_fasta(self, uniprot_id: str) -> str:
@@ -209,8 +211,8 @@ class ProteinEngine:
 
         raise RuntimeError(f"AlphaFold DB 3D structure PDB file unavailable for UniProt ID: {uniprot_id}")
 
-    def get_protein_info(self, uniprot_id: str = "P10324", name: str = "ALS / AHAS Weed Target") -> Dict[str, Any]:
-        """Strict scientific protein fetch and analysis pipeline."""
+    def get_protein_info(self, uniprot_id: str, name: str = "Target Protein") -> Dict[str, Any]:
+        """Strict scientific protein fetch and analysis pipeline without default accession fallbacks."""
         sequence = self.fetch_uniprot_fasta(uniprot_id)
         pdb_path = self.fetch_alphafold_structure(uniprot_id)
 
