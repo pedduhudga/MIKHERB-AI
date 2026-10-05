@@ -416,9 +416,9 @@ def test_molecular_generation_manager_strict_7_stage_target_validation_gate():
     assert res_valid["valid_count"] > 0
     # Structure-based pocket complementarity must be evaluated
     mol_1 = res_valid["molecules"][0]
-    assert mol_1.pocket_complementarity is not None
-    assert 0.0 <= mol_1.pocket_complementarity.pocket_fit_score <= 1.0
-    assert mol_1.pocket_complementarity.shape_complementarity >= 0.0
+    assert mol_1["pocket_complementarity"] is not None
+    assert 0.0 <= mol_1["pocket_complementarity"]["pocket_fit_score"] <= 1.0
+    assert mol_1["pocket_complementarity"]["shape_complementarity"] >= 0.0
 
 
 def test_top_n_candidate_limit_enforcement_up_to_500():
@@ -451,7 +451,8 @@ def test_structure_based_pocket_pharmacophore_analysis():
     pocket_dict = {
         "center": [10.0, 20.0, 30.0],
         "score": 0.85,
-        "residues": ["ASP", "LYS", "PHE", "ARG", "SER", "VAL", "LEU", "TYR"]
+        "volume": 850.0,
+        "residues": ["ASP", "LYS", "PHE", "ARG", "SER", "VAL", "LEU", "TYR", "GLY", "ALA", "ILE", "MET", "THR"]
     }
     features = PocketPharmacophoreAnalyzer.extract_pocket_features(pocket_dict)
     assert features["pocket_volume_angstrom3"] > 300.0
