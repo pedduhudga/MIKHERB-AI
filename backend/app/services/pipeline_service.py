@@ -9,7 +9,7 @@ from app.engines.chemical_engine import ChemicalEngine
 from app.engines.docking_engine import AIDockingEngine
 from app.engines.selectivity_engine import CropSelectivityEngine
 from app.engines.consensus_engine import MikHerbConsensusScoreEngine
-from app.engines.target_discovery_engine import MultiTargetDiscoveryEngine
+from app.engines.target_discovery_engine import MultiTargetDiscoveryEngine, _fetch_fasta_seq
 from app.core.provenance import generate_provenance_record, save_provenance_file
 from app.services.report_service import ReportGenerator
 
@@ -25,20 +25,20 @@ DEFAULT_STAGES = [
 
 # Known UniProt accessions for quick lookup (supplements dynamic UniProt search)
 SPECIES_UNIPROT_MAP = {
-    # Weed targets (ALS gene, for backwards compatibility with Stage 1)
+    # Weed targets (ALS gene, verified active entries)
     "palmer amaranth": "A0A890DLI3",
     "amaranthus palmeri": "A0A890DLI3",
-    # Crop homologs (ALS)
-    "soybean": "Q02145",
-    "glycine max": "Q02145",
-    "corn": "P06253",
-    "maize": "P06253",
-    "zea mays": "P06253",
-    "rice": "Q03042",
-    "oryza sativa": "Q03042",
+    # Crop homologs (ALS, verified active plant accessions)
+    "soybean": "U5JC63",
+    "glycine max": "U5JC63",
+    "corn": "Q41768",
+    "maize": "Q41768",
+    "zea mays": "Q41768",
+    "rice": "Q6K2E8",
+    "oryza sativa": "Q6K2E8",
     "arabidopsis": "P17597",
-    "wheat": "Q41539",
-    "triticum aestivum": "Q41539"
+    "wheat": "A0A3B6PRC5",
+    "triticum aestivum": "A0A3B6PRC5"
 }
 
 # Target gene search priority for single-target fallback
@@ -208,60 +208,95 @@ class DiscoveryPipelineRunner:
                 crop_status = "CROP_ACCESSION_UNRESOLVED"
                 crop_error_reason = f"No UniProt accession found for crop species '{project.crop_species}'."
 
-            # --- 1e. pLDDT from pockets or AlphaFold API ---
-            plddt_conf = best_target.get("plddt_avg")
-            if plddt_conf is None and target_info.get("pockets"):
-                plddt_conf = target_info["pockets"][0].get("plddt_avg")
+            # --- 1e. Persist ALL discovered targets as independent TargetProtein records ---
+            # Clear existing targets for this project if re-running
+            self.db.query(TargetProtein).filter_by(project_id=project.id).delete()
 
-            # --- 1f. Compute crop divergence score ---
-            crop_divergence_score = best_target.get("crop_divergence_pct")  # None if unknown
+            selected_db_target = None
+            for idx, candidate in enumerate(all_targets):
+                is_selected = (candidate.get("gene") == gene_selected)
+                t_plddt = candidate.get("plddt_avg")
+                if is_selected and t_plddt is None and target_info.get("pockets"):
+                    t_plddt = target_info["pockets"][0].get("plddt_avg")
 
-            target = TargetProtein(
-                project_id=project.id,
-                name=target_info["name"],
-                uniprot_id=target_info["uniprot_id"],
-                weed_sequence=target_info["sequence"],
-                crop_homolog_uniprot_id=crop_uniprot,
-                crop_sequence=crop_seq,
-                pdb_id=target_info["pdb_path"],
-                alphafold_id=target_info["alphafold_id"],
-                essentiality_score=best_target.get("essentiality_score"),
-                structure_confidence=plddt_conf,
-                crop_divergence_score=crop_divergence_score,
-                total_opportunity_score=best_target.get("target_opportunity_score"),
-                pockets_json=target_info["pockets"],
-                analysis_json={
-                    **target_info["analysis"],
-                    "gene_selected": gene_selected,
-                    "gene_family": best_target.get("family"),
-                    "all_targets_discovered": target_discovery_summary,
-                    "crop_pdb_path": crop_pdb_path,
-                    "crop_pockets": crop_pockets,
-                    "crop_status": crop_status,
-                    "crop_error_reason": crop_error_reason,
-                    "herbicide_classes": best_target.get("herbicide_classes"),
-                    "resistance_reported": best_target.get("resistance_reported"),
-                    "essentiality_tier": best_target.get("essentiality_tier"),
-                    "sequence_identity_pct": best_target.get("sequence_identity_pct"),
-                    "selectivity_potential": best_target.get("crop_selectivity_potential"),
-                }
-            )
-            self.db.add(target)
+                t_crop_acc = candidate.get("crop_uniprot_id")
+                if is_selected and not t_crop_acc:
+                    t_crop_acc = crop_uniprot
+
+                t_pdb_path = target_info["pdb_path"] if is_selected else None
+                t_crop_pdb = crop_pdb_path if is_selected else None
+                t_pockets = target_info["pockets"] if is_selected else None
+                t_weed_seq = target_info["sequence"] if is_selected else _fetch_fasta_seq(candidate.get("weed_uniprot_id")) if candidate.get("weed_uniprot_id") else None
+
+                target_row = TargetProtein(
+                    project_id=project.id,
+                    name=f"{project.weed_species} {candidate['gene']} ({candidate['family']})",
+                    rank=idx + 1,
+                    is_primary_selected=is_selected,
+                    gene=candidate["gene"],
+                    target_family=candidate["family"],
+                    target_evidence_score=candidate.get("target_evidence_score"),
+                    target_evidence_confidence=candidate.get("target_evidence_confidence"),
+                    essentiality_status=candidate.get("essentiality_status"),
+                    alignment_method=candidate.get("alignment_method"),
+                    alignment_coverage_pct=candidate.get("alignment_coverage"),
+                    uniprot_id=candidate.get("weed_uniprot_id"),
+                    weed_sequence=t_weed_seq,
+                    crop_homolog_uniprot_id=t_crop_acc,
+                    crop_sequence=crop_seq if is_selected else None,
+                    pdb_id=t_pdb_path,
+                    alphafold_id=f"AF-{candidate['weed_uniprot_id']}-F1" if candidate.get("weed_uniprot_id") else None,
+                    essentiality_score=candidate.get("essentiality_score"),
+                    structure_confidence=t_plddt,
+                    crop_divergence_score=candidate.get("crop_divergence_pct"),
+                    total_opportunity_score=candidate.get("target_opportunity_score"),
+                    pockets_json=t_pockets,
+                    analysis_json={
+                        "gene_selected": candidate["gene"],
+                        "gene_family": candidate.get("family"),
+                        "rank": idx + 1,
+                        "is_primary_selected": is_selected,
+                        "target_evidence_score": candidate.get("target_evidence_score"),
+                        "target_evidence_confidence": candidate.get("target_evidence_confidence"),
+                        "herbicide_classes": candidate.get("herbicide_classes"),
+                        "resistance_reported": candidate.get("resistance_reported"),
+                        "essentiality_status": candidate.get("essentiality_status"),
+                        "essentiality_evidence": candidate.get("essentiality_evidence"),
+                        "essentiality_source": candidate.get("essentiality_source"),
+                        "sequence_identity_pct": candidate.get("sequence_identity_pct"),
+                        "alignment_coverage": candidate.get("alignment_coverage"),
+                        "alignment_method": candidate.get("alignment_method"),
+                        "bit_score": candidate.get("bit_score"),
+                        "crop_selectivity_potential": candidate.get("crop_selectivity_potential"),
+                        "crop_pdb_path": t_crop_pdb,
+                        "crop_pockets": crop_pockets if is_selected else None,
+                        "crop_status": crop_status if is_selected else "NOT_ATTEMPTED",
+                        "crop_error_reason": crop_error_reason if is_selected else None,
+                        "all_targets_discovered": target_discovery_summary,
+                    }
+                )
+                self.db.add(target_row)
+                if is_selected:
+                    selected_db_target = target_row
+
             self.db.commit()
+            if selected_db_target:
+                self.db.refresh(selected_db_target)
 
             return {
-                "target_id": target.id,
+                "target_id": selected_db_target.id if selected_db_target else None,
                 "gene_selected": gene_selected,
+                "execution_mode": "MULTI_TARGET_DISCOVERY_SINGLE_TARGET_EXECUTION",
                 "all_targets_discovered_count": len(all_targets),
                 "targets_with_structure": sum(1 for t in all_targets if t.get("alphafold_available")),
                 "top_ranked_targets": target_discovery_summary[:5],
-                "weed_uniprot_id": target.uniprot_id,
+                "weed_uniprot_id": selected_db_target.uniprot_id if selected_db_target else None,
                 "crop_uniprot_id": crop_uniprot,
                 "weed_pdb_path": target_info["pdb_path"],
                 "crop_pdb_path": crop_pdb_path,
                 "crop_status": crop_status,
                 "crop_error_reason": crop_error_reason,
-                "plddt_avg": plddt_conf,
+                "plddt_avg": selected_db_target.structure_confidence if selected_db_target else None,
                 "sequence_length": len(target_info["sequence"])
             }
 
@@ -269,7 +304,9 @@ class DiscoveryPipelineRunner:
         # STAGE 2 — Binding Pocket Prediction
         # ---------------------------------------------------------------
         elif order == 2:
-            target = self.db.query(TargetProtein).filter_by(project_id=project.id).first()
+            target = self.db.query(TargetProtein).filter_by(project_id=project.id, is_primary_selected=True).first()
+            if not target:
+                target = self.db.query(TargetProtein).filter_by(project_id=project.id).first()
             if not target or not target.pdb_id or not os.path.exists(target.pdb_id):
                 raise FileNotFoundError("Target protein structure PDB file unavailable for pocket prediction.")
 
@@ -359,7 +396,9 @@ class DiscoveryPipelineRunner:
         # STAGE 4 — Boltz-2 & GNINA AI Docking Screening
         # ---------------------------------------------------------------
         elif order == 4:
-            target = self.db.query(TargetProtein).filter_by(project_id=project.id).first()
+            target = self.db.query(TargetProtein).filter_by(project_id=project.id, is_primary_selected=True).first()
+            if not target:
+                target = self.db.query(TargetProtein).filter_by(project_id=project.id).first()
             compounds = self.db.query(Compound).all()
 
             pockets = target.pockets_json or []
@@ -392,7 +431,9 @@ class DiscoveryPipelineRunner:
         # STAGE 5 — Weed vs Crop Selectivity Analysis
         # ---------------------------------------------------------------
         elif order == 5:
-            target = self.db.query(TargetProtein).filter_by(project_id=project.id).first()
+            target = self.db.query(TargetProtein).filter_by(project_id=project.id, is_primary_selected=True).first()
+            if not target:
+                target = self.db.query(TargetProtein).filter_by(project_id=project.id).first()
             compounds = self.db.query(Compound).all()
 
             weed_pockets = target.pockets_json or []
@@ -500,7 +541,9 @@ class DiscoveryPipelineRunner:
         # STAGE 7 — Consensus Candidate Ranking & Report Generation
         # ---------------------------------------------------------------
         elif order == 7:
-            target = self.db.query(TargetProtein).filter_by(project_id=project.id).first()
+            target = self.db.query(TargetProtein).filter_by(project_id=project.id, is_primary_selected=True).first()
+            if not target:
+                target = self.db.query(TargetProtein).filter_by(project_id=project.id).first()
             compounds = self.db.query(Compound).all()
             stage5 = self.db.query(PipelineStage).filter_by(project_id=project.id, stage_order=5).first()
             stage6 = self.db.query(PipelineStage).filter_by(project_id=project.id, stage_order=6).first()

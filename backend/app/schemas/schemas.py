@@ -37,6 +37,15 @@ class TargetProteinResponse(BaseModel):
     id: int
     project_id: int
     name: str
+    rank: Optional[int] = None
+    is_primary_selected: Optional[bool] = False
+    gene: Optional[str] = None
+    target_family: Optional[str] = None
+    target_evidence_score: Optional[float] = None
+    target_evidence_confidence: Optional[str] = None
+    essentiality_status: Optional[str] = None
+    alignment_method: Optional[str] = None
+    alignment_coverage_pct: Optional[float] = None
     uniprot_id: Optional[str] = None
     weed_sequence: Optional[str] = None
     crop_homolog_uniprot_id: Optional[str] = None

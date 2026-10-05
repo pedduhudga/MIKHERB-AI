@@ -339,22 +339,83 @@ def test_target_discovery_engine_returns_ranked_list():
         results = engine.discover_targets("Palmer Amaranth", max_targets=10)
 
     assert len(results) == 10
-    # Results should be sorted by target_opportunity_score descending
-    scores = [r["target_opportunity_score"] for r in results]
-    assert scores == sorted(scores, reverse=True), "Results must be sorted by opportunity score descending."
+    # Results should be sorted by target_opportunity_score (non-None first, highest first)
+    valid_scores = [r["target_opportunity_score"] for r in results if r["target_opportunity_score"] is not None]
+    assert valid_scores == sorted(valid_scores, reverse=True), "Results must be sorted by opportunity score descending."
 
 
 def test_target_discovery_essentiality_scoring():
-    """ESSENTIAL_UNIQUE targets should score higher than LIKELY_ESSENTIAL."""
-    with patch("app.engines.target_discovery_engine._search_uniprot", return_value=None), \
-         patch("app.engines.target_discovery_engine._check_alphafold_available", return_value=(False, None)), \
-         patch("app.engines.target_discovery_engine._fetch_fasta_seq", return_value=None):
-
-        engine = MultiTargetDiscoveryEngine()
-        essential_score = engine._score_essentiality({"essentiality_tier": "ESSENTIAL_UNIQUE"})
-        likely_score = engine._score_essentiality({"essentiality_tier": "LIKELY_ESSENTIAL"})
-
+    """ESSENTIAL_UNIQUE targets should score higher than LIKELY_ESSENTIAL when weed evidence exists."""
+    engine = MultiTargetDiscoveryEngine()
+    essential_score = engine._score_essentiality({"essentiality_status": "ESSENTIAL_KNOWN"}, has_weed_evidence=True)
+    likely_score = engine._score_essentiality({"essentiality_status": "LIKELY_ESSENTIAL"}, has_weed_evidence=True)
     assert essential_score > likely_score
+
+
+def test_target_discovery_essentiality_none_without_weed_evidence():
+    """Essentiality score must be None (not manufactured 90.0) when weed evidence is absent."""
+    engine = MultiTargetDiscoveryEngine()
+    score = engine._score_essentiality({"essentiality_status": "ESSENTIAL_KNOWN"}, has_weed_evidence=False)
+    assert score is None, "Missing weed evidence must NEVER manufacture an essentiality score."
+
+
+def test_target_discovery_opportunity_none_without_weed_evidence():
+    """target_opportunity_score must be None when no weed accession or sequence exists."""
+    engine = MultiTargetDiscoveryEngine()
+    opp_score = engine._compute_opportunity_score(
+        essentiality_score=None,
+        herbicide_evidence_score=66.0,
+        selectivity_potential_score=None,
+        structure_score=None,
+        has_weed_evidence=False
+    )
+    assert opp_score is None, "Opportunity score cannot be fabricated when weed target evidence is absent."
+
+
+def test_target_discovery_evidence_score_vs_opportunity_score():
+    """target_evidence_score and target_opportunity_score must be distinctly separated metrics."""
+    with patch("app.engines.target_discovery_engine._search_uniprot", return_value="A0A890DLI3"), \
+         patch("app.engines.target_discovery_engine._check_alphafold_available", return_value=(True, 94.0)), \
+         patch("app.engines.target_discovery_engine._fetch_fasta_seq", return_value="MAATVSFGKLHQR"):
+
+        engine = MultiTargetDiscoveryEngine(crop_species="Soybean")
+        record = engine._assess_single_target("Palmer Amaranth", TARGET_CATALOGUE[0])
+
+    assert "target_evidence_score" in record
+    assert "target_opportunity_score" in record
+    assert "target_evidence_confidence" in record
+    assert record["target_evidence_score"] > 0.0
+    assert record["target_evidence_confidence"] in ("HIGH", "MEDIUM", "LOW", "HYPOTHESIS_ONLY")
+
+
+def test_target_discovery_pairwise_biopython_alignment():
+    """Biopython pairwise alignment must handle indels properly without positional distortion."""
+    from app.engines.target_discovery_engine import _align_pairwise_biopython
+    # seq_b has a 2-amino acid internal deletion relative to seq_a
+    seq_a = "ABCDEFGHIJK"
+    seq_b = "ABCFGHIJK"
+
+    aln = _align_pairwise_biopython(seq_a, seq_b)
+    assert aln["sequence_identity"] is not None
+    assert aln["alignment_method"] == "Biopython-Needleman-Wunsch-Global"
+    assert aln["alignment_coverage"] is not None
+    assert aln["bit_score"] is not None
+    # 9 matching characters out of 11 length = 81.8%
+    assert aln["sequence_identity"] == 81.8
+
+
+def test_target_discovery_provenance_records_present():
+    """Curated accessions must provide structured provenance metadata records."""
+    engine = MultiTargetDiscoveryEngine(crop_species="Soybean")
+    record = engine._assess_single_target("Palmer Amaranth", TARGET_CATALOGUE[0])
+    prov = record.get("weed_accession_provenance")
+
+    assert prov is not None
+    assert prov["accession"] == "A0A890DLI3"
+    assert prov["source"] == "UniProt"
+    assert prov["source_type"] == "CURATED_MAPPING"
+    assert "retrieved_at" in prov
+    assert "reviewed" in prov
 
 
 def test_target_discovery_alphafold_filter():
@@ -364,33 +425,33 @@ def test_target_discovery_alphafold_filter():
          patch("app.engines.target_discovery_engine._fetch_fasta_seq", return_value="MAATVS"):
 
         engine = MultiTargetDiscoveryEngine()
-        results = engine.discover_targets("Test Weed", require_alphafold=True)
+        results = engine.discover_targets("Unknown Weed", require_alphafold=True)
 
     assert len(results) == 0, "With all AlphaFold returns False, no targets should pass filter."
 
 
 def test_target_discovery_crop_divergence_computed():
-    """When crop data is available, crop_divergence_pct should be computed (not None)."""
+    """When crop data is available, crop_divergence_pct should be computed via real alignment."""
     mock_seq_weed = "MAATVSFGKLHQR"
-    mock_seq_crop = "MAATVSAGKLHQR"  # One difference at position 8
+    mock_seq_crop = "MAATVSAGKLHQR"  # One difference at position 7
 
     with patch("app.engines.target_discovery_engine._search_uniprot", return_value="MOCK_ACC"), \
          patch("app.engines.target_discovery_engine._check_alphafold_available", return_value=(True, 92.5)), \
          patch("app.engines.target_discovery_engine._fetch_fasta_seq", side_effect=[mock_seq_weed, mock_seq_crop]):
 
         engine = MultiTargetDiscoveryEngine(crop_species="Soybean")
-        # Only assess a single target to control mock call count
-        result = engine._assess_single_target("soybean", "Soybean", TARGET_CATALOGUE[0])
+        result = engine._assess_single_target("Soybean", TARGET_CATALOGUE[0])
 
     assert result["crop_divergence_pct"] is not None
     assert result["sequence_identity_pct"] is not None
+    assert result["alignment_method"] == "Biopython-Needleman-Wunsch-Global"
     assert 0.0 <= result["crop_divergence_pct"] <= 100.0
 
 
 def test_target_discovery_selectivity_none_when_no_crop():
     """selectivity_potential_score should be None when crop divergence is unavailable."""
     engine = MultiTargetDiscoveryEngine()
-    score = engine._score_selectivity_potential(TARGET_CATALOGUE[0], None, None)
+    score = engine._score_selectivity_potential(TARGET_CATALOGUE[0], None)
     assert score is None
 
 

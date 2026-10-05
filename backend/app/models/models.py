@@ -49,6 +49,19 @@ class TargetProtein(Base):
     pdb_id = Column(String, nullable=True)
     alphafold_id = Column(String, nullable=True)
 
+    # Multi-Target Discovery & Ranking metadata
+    rank = Column(Integer, nullable=True)
+    is_primary_selected = Column(Boolean, default=False)
+    gene = Column(String, nullable=True)
+    target_family = Column(String, nullable=True)
+    target_evidence_score = Column(Float, nullable=True)
+    target_evidence_confidence = Column(String, nullable=True)  # HIGH, MEDIUM, LOW, HYPOTHESIS_ONLY
+    essentiality_status = Column(String, nullable=True)
+
+    # Alignment Provenance
+    alignment_method = Column(String, nullable=True)
+    alignment_coverage_pct = Column(Float, nullable=True)
+
     # Target Opportunity Scores — NULL = not measured (not fabricated defaults)
     essentiality_score = Column(Float, nullable=True)
     weed_specificity_score = Column(Float, nullable=True)
