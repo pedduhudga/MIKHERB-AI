@@ -260,10 +260,17 @@ class AIDockingEngine:
         self.gnina = GNINAAdapter()
 
     def screen_candidate(self, protein_pdb_path: str, smiles: str, pocket_center: List[float] = None) -> Dict[str, Any]:
-        pocket = pocket_center or [0.0, 0.0, 0.0]
+        if not pocket_center or len(pocket_center) != 3:
+            return {
+                "status": "POCKET_CENTER_MISSING",
+                "error": "Valid 3D pocket center coordinates required for docking screening.",
+                "boltz": {"status": "POCKET_CENTER_MISSING", "pKd_predicted": None},
+                "gnina": {"status": "POCKET_CENTER_MISSING", "affinity_kcal_mol": None},
+                "pose_agreement": "NOT_AVAILABLE"
+            }
 
-        boltz_res = self.boltz.predict_complex(protein_pdb_path, smiles, pocket)
-        gnina_res = self.gnina.dock(protein_pdb_path, smiles, pocket)
+        boltz_res = self.boltz.predict_complex(protein_pdb_path, smiles, pocket_center)
+        gnina_res = self.gnina.dock(protein_pdb_path, smiles, pocket_center)
 
         boltz_pKd = boltz_res.get("pKd_predicted") if boltz_res.get("status") == "COMPLETED" else None
         gnina_aff = gnina_res.get("affinity_kcal_mol") if gnina_res.get("status") == "COMPLETED" else None

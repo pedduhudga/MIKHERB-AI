@@ -12,7 +12,9 @@ class ChemicalEngine:
         "atrazine": "CCNc1nc(nc(n1)Cl)NC(C)C",
         "glyphosate": "C(C(=O)O)NCP(=O)(O)O",
         "2_4_d": "O=C(O)COc1ccc(Cl)cc1Cl",
-        "paraquat": "C[n+]1ccc(cc1)c2cc[n+](C)cc2"
+        "paraquat": "C[n+]1ccc(cc1)c2cc[n+](C)cc2",
+        "imazethapyr": "CC1=NC(C(C)C)=NC(=O)C1=C2C=CC(=CC2=O)O",
+        "chlorimuron_ethyl": "CCN(C)c1nc(nc(n1)Cl)NS(=O)(=O)c2ccccc2C(=O)OCC"
     }
 
     @staticmethod
@@ -104,18 +106,29 @@ class ChemicalEngine:
 
     def build_library(self, initial_compounds: List[Dict[str, str]]) -> List[Dict[str, Any]]:
         processed = []
+        seen_smiles = set()
         for idx, comp in enumerate(initial_compounds, 1):
             smiles = comp.get("smiles", "")
             code = comp.get("code", f"MH-{idx:06d}")
-            desc = self.calculate_descriptors(smiles)
+            std_smiles = self.standardize_smiles(smiles)
+            if not std_smiles or std_smiles in seen_smiles:
+                continue
+            seen_smiles.add(std_smiles)
+
+            desc = self.calculate_descriptors(std_smiles)
             if desc:
-                # Tanimoto similarity against reference commercial herbicide Atrazine
-                sim = self.compute_tanimoto_similarity(smiles, self.REFERENCE_HERBICIDES["atrazine"])
+                max_sim = 0.0
+                for ref_smiles in self.REFERENCE_HERBICIDES.values():
+                    sim = self.compute_tanimoto_similarity(std_smiles, ref_smiles)
+                    if sim > max_sim:
+                        max_sim = sim
+
                 processed.append({
                     "compound_code": code,
                     "name": comp.get("name", f"Compound-{idx}"),
-                    "smiles": smiles,
+                    "smiles": std_smiles,
                     **desc,
-                    "novelty_score": round(max(10.0, 100.0 - (sim * 80.0)), 1)
+                    "max_tanimoto_reference_similarity": max_sim,
+                    "novelty_score": round(max(10.0, 100.0 - (max_sim * 80.0)), 1)
                 })
         return processed

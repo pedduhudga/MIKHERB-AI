@@ -169,7 +169,7 @@ export default function App() {
           </div>
           <div className="h-4 w-px bg-slate-800" />
           <div>
-            <span>GPU: <strong className="text-emerald-400">{hardware?.gpu.name || "NVIDIA Active"}</strong></span>
+            <span>GPU: <strong className="text-emerald-400">{hardware?.gpu.name || "NOT_DETECTED"}</strong></span>
           </div>
           <div className="h-4 w-px bg-slate-800" />
           <div className="flex items-center gap-1.5">

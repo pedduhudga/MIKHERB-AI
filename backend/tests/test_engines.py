@@ -54,6 +54,21 @@ def test_docking_engine_status_awareness():
     assert res["gnina"]["status"] in ["COMPLETED", "NOT_INSTALLED", "FAILED_EXECUTION"]
     assert "pose_agreement" in res
 
+def test_docking_engine_missing_pocket_rejection():
+    de = AIDockingEngine()
+    res = de.screen_candidate("dummy.pdb", "CC(=O)Oc1ccccc1C(=O)O", pocket_center=None)
+    assert res["status"] == "POCKET_CENTER_MISSING"
+    assert res["boltz"]["status"] == "POCKET_CENTER_MISSING"
+
+def test_chemical_engine_deduplication():
+    ce = ChemicalEngine()
+    comps = [
+        {"code": "C1", "name": "Compound 1", "smiles": "CC(=O)Oc1ccccc1C(=O)O"},
+        {"code": "C2", "name": "Compound 2", "smiles": "CC(=O)Oc1ccccc1C(=O)O"}  # Duplicate
+    ]
+    lib = ce.build_library(comps)
+    assert len(lib) == 1
+
 def test_consensus_engine_zero_parameters():
     me = MikHerbConsensusScoreEngine()
     score_res = me.calculate_score()
