@@ -75,3 +75,10 @@ def test_pipeline_execution_integrity():
                 assert c["status"] == "HYPOTHESIS_ONLY"
     finally:
         db.close()
+
+def test_firebase_status_endpoint():
+    response = client.get("/api/v1/system/firebase")
+    assert response.status_code == 200
+    data = response.json()
+    assert "firebase_active" in data
+    assert "mode" in data

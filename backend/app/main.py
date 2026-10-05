@@ -41,6 +41,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from app.core.firebase import init_firebase, is_firebase_active
+
+# Initialize Firebase if credentials exist
+init_firebase()
+
 # Global service instances
 protein_engine = ProteinEngine()
 chemical_engine = ChemicalEngine()
@@ -60,6 +65,13 @@ def get_hardware_status():
 @app.get("/api/v1/system/engines")
 def get_engines_status():
     return engine_status_manager.get_all_statuses()
+
+@app.get("/api/v1/system/firebase")
+def get_firebase_status():
+    return {
+        "firebase_active": is_firebase_active(),
+        "mode": "firebase_connected" if is_firebase_active() else "local_sqlite_fallback"
+    }
 
 # Projects & Pipeline
 @app.post("/api/v1/projects", response_model=ProjectResponse)

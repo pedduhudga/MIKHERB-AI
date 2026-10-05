@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import type { HardwareStatus, Project, Candidate } from './types';
 import { ProteinViewer3D } from './components/ProteinViewer3D';
+import { FirebaseAuthButton } from './components/FirebaseAuthButton';
+import { api } from './services/api';
 import {
   Dna, Beaker, FlaskConical, TestTube, Cpu, ShieldAlert, Bot, Plus, Play, ArrowRight
 } from 'lucide-react';
@@ -37,8 +39,8 @@ export default function App() {
 
   const fetchHardware = async () => {
     try {
-      const res = await fetch('http://localhost:8000/api/v1/system/hardware');
-      if (res.ok) setHardware(await res.json());
+      const data = await api.getHardware();
+      setHardware(data);
     } catch (e) {
       console.error(e);
     }
@@ -46,14 +48,11 @@ export default function App() {
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch('http://localhost:8000/api/v1/projects');
-      if (res.ok) {
-        const data = await res.json();
-        setProjects(data);
-        if (data.length > 0 && !selectedProject) {
-          setSelectedProject(data[0]);
-          fetchCandidates(data[0].id);
-        }
+      const data = await api.getProjects();
+      setProjects(data);
+      if (data.length > 0 && !selectedProject) {
+        setSelectedProject(data[0]);
+        fetchCandidates(data[0].id);
       }
     } catch (e) {
       console.error(e);
@@ -62,12 +61,9 @@ export default function App() {
 
   const fetchCandidates = async (projId: number) => {
     try {
-      const res = await fetch(`http://localhost:8000/api/v1/projects/${projId}/candidates`);
-      if (res.ok) {
-        const data = await res.json();
-        setCandidates(data);
-        if (data.length > 0) setSelectedCandidate(data[0]);
-      }
+      const data = await api.getCandidates(projId);
+      setCandidates(data);
+      if (data.length > 0) setSelectedCandidate(data[0]);
     } catch (e) {
       console.error(e);
     }
@@ -76,22 +72,15 @@ export default function App() {
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('http://localhost:8000/api/v1/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: newProjName,
-          weed_species: newWeed,
-          crop_species: newCrop,
-          objective: newObj
-        })
+      const proj = await api.createProject({
+        name: newProjName,
+        weed_species: newWeed,
+        crop_species: newCrop,
+        objective: newObj
       });
-      if (res.ok) {
-        const proj = await res.json();
-        setProjects([...projects, proj]);
-        setSelectedProject(proj);
-        handleRunDiscovery(proj.id);
-      }
+      setProjects([...projects, proj]);
+      setSelectedProject(proj);
+      handleRunDiscovery(proj.id);
     } catch (e) {
       console.error(e);
     }
@@ -99,7 +88,7 @@ export default function App() {
 
   const handleRunDiscovery = async (projId: number) => {
     try {
-      await fetch(`http://localhost:8000/api/v1/projects/${projId}/run`, { method: 'POST' });
+      await api.runPipeline(projId);
       setTimeout(() => {
         fetchProjects();
         fetchCandidates(projId);
@@ -111,18 +100,14 @@ export default function App() {
 
   const handleAnalyzeFormulation = async () => {
     try {
-      const res = await fetch('http://localhost:8000/api/v1/formulation/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: formName,
-          active_ingredient: activeIng,
-          active_concentration_g_l: conc,
-          solvent,
-          surfactant
-        })
+      const data = await api.analyzeFormulation({
+        name: formName,
+        active_ingredient: activeIng,
+        active_concentration_g_l: conc,
+        solvent,
+        surfactant
       });
-      if (res.ok) setFormResult(await res.json());
+      setFormResult(data);
     } catch (e) {
       console.error(e);
     }
@@ -135,11 +120,8 @@ export default function App() {
     setChatLog(prev => [...prev, { role: 'user', text: userText }]);
 
     try {
-      const res = await fetch(`http://localhost:8000/api/v1/agent/chat?query=${encodeURIComponent(userText)}`, { method: 'POST' });
-      if (res.ok) {
-        const data = await res.json();
-        setChatLog(prev => [...prev, { role: 'agent', text: data.agent_response, data: data.output_data }]);
-      }
+      const data = await api.sendAgentQuery(userText);
+      setChatLog(prev => [...prev, { role: 'agent', text: data.agent_response, data: data.output_data }]);
     } catch (e) {
       console.error(e);
     }
@@ -158,24 +140,27 @@ export default function App() {
           </div>
         </div>
 
-        <div className="flex items-center gap-4 bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-xs">
-          <div className="flex items-center gap-2">
-            <Cpu className="w-4 h-4 text-emerald-400" />
-            <span>CPU: <strong className="text-slate-200">{hardware?.cpu.cores || 8} Cores</strong></span>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-xs">
+            <div className="flex items-center gap-2">
+              <Cpu className="w-4 h-4 text-emerald-400" />
+              <span>CPU: <strong className="text-slate-200">{hardware?.cpu.cores || 8} Cores</strong></span>
+            </div>
+            <div className="h-4 w-px bg-slate-800" />
+            <div>
+              <span>RAM: <strong className="text-slate-200">{hardware?.memory.total_gb || 16} GB</strong></span>
+            </div>
+            <div className="h-4 w-px bg-slate-800" />
+            <div>
+              <span>GPU: <strong className="text-emerald-400">{hardware?.gpu.name || "NOT_DETECTED"}</strong></span>
+            </div>
+            <div className="h-4 w-px bg-slate-800" />
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-emerald-400 font-semibold">Engine Connected</span>
+            </div>
           </div>
-          <div className="h-4 w-px bg-slate-800" />
-          <div>
-            <span>RAM: <strong className="text-slate-200">{hardware?.memory.total_gb || 16} GB</strong></span>
-          </div>
-          <div className="h-4 w-px bg-slate-800" />
-          <div>
-            <span>GPU: <strong className="text-emerald-400">{hardware?.gpu.name || "NOT_DETECTED"}</strong></span>
-          </div>
-          <div className="h-4 w-px bg-slate-800" />
-          <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-emerald-400 font-semibold">Local-First Engine Ready</span>
-          </div>
+          <FirebaseAuthButton />
         </div>
       </header>
 
