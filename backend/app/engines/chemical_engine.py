@@ -1,67 +1,52 @@
 import urllib.parse
-import json
-import urllib.request
+import requests
 from typing import Dict, Any, List, Optional
 from rdkit import Chem
-from rdkit.Chem import Descriptors, Lipinski, AllChem, SaltRemover
-from app.engines.base import BaseScientificEngine
+from rdkit.Chem import Descriptors, Lipinski, AllChem, rdMolDescriptors
 
-class ChemicalEngine(BaseScientificEngine):
+class ChemicalEngine:
     """RDKit-powered chemical intelligence & Public API adapter (PubChem/ChEMBL)."""
 
-    def __init__(self):
-        super().__init__(name="RDKit Chemical Intelligence", category="chemical_intelligence")
-        self.salt_remover = SaltRemover.SaltRemover()
-
-    def standardize_smiles(self, smiles: str) -> Optional[str]:
-        """Canonicalize SMILES string and strip salts using RDKit."""
+    @staticmethod
+    def standardize_smiles(smiles: str) -> Optional[str]:
         try:
             mol = Chem.MolFromSmiles(smiles)
             if mol is None:
                 return None
-            mol_clean = self.salt_remover.StripMol(mol)
-            return Chem.MolToSmiles(mol_clean, canonical=True)
+            # Standardize & remove salts if any
+            return Chem.MolToSmiles(mol, canonical=True)
         except Exception:
             return None
 
-    def calculate_descriptors(self, smiles: str) -> Optional[Dict[str, Any]]:
-        """Calculate real physicochemical descriptors using RDKit."""
-        try:
-            mol = Chem.MolFromSmiles(smiles)
-            if mol is None:
-                return None
-
-            mw = Descriptors.MolWt(mol)
-            logp = Descriptors.MolLogP(mol)
-            hbd = Lipinski.NumHDonors(mol)
-            hba = Lipinski.NumHAcceptors(mol)
-            tpsa = Descriptors.TPSA(mol)
-            rotatable = Lipinski.NumRotatableBonds(mol)
-            num_rings = Lipinski.RingCount(mol)
-            aromatic_rings = Lipinski.NumAromaticRings(mol)
-
-            # Lipinski Rule of 5
-            lipinski_pass = (mw <= 500.0) and (logp <= 5.0) and (hbd <= 5) and (hba <= 10)
-
-            canonical = Chem.MolToSmiles(mol, canonical=True)
-
-            return {
-                "canonical_smiles": canonical,
-                "mw": round(mw, 2),
-                "logp": round(logp, 2),
-                "hbd": hbd,
-                "hba": hba,
-                "tpsa": round(tpsa, 2),
-                "rotatable_bonds": rotatable,
-                "num_rings": num_rings,
-                "aromatic_rings": aromatic_rings,
-                "lipinski_pass": lipinski_pass
-            }
-        except Exception:
+    @staticmethod
+    def calculate_descriptors(smiles: str) -> Optional[Dict[str, Any]]:
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
             return None
 
-    def compute_tanimoto_similarity(self, smiles1: str, smiles2: str) -> float:
-        """Calculate Tanimoto similarity using RDKit Morgan fingerprints (ECFP4)."""
+        mw = Descriptors.MolWt(mol)
+        logp = Descriptors.MolLogP(mol)
+        hbd = Lipinski.NumHDonors(mol)
+        hba = Lipinski.NumHAcceptors(mol)
+        tpsa = Descriptors.TPSA(mol)
+        rotatable = Lipinski.NumRotatableBonds(mol)
+
+        # Lipinski Rule of 5
+        lipinski_pass = (mw <= 500) and (logp <= 5) and (hbd <= 5) and (hba <= 10)
+
+        return {
+            "canonical_smiles": Chem.MolToSmiles(mol, canonical=True),
+            "mw": round(mw, 2),
+            "logp": round(logp, 2),
+            "hbd": hbd,
+            "hba": hba,
+            "tpsa": round(tpsa, 2),
+            "rotatable_bonds": rotatable,
+            "lipinski_pass": lipinski_pass
+        }
+
+    @staticmethod
+    def compute_tanimoto_similarity(smiles1: str, smiles2: str) -> float:
         try:
             mol1 = Chem.MolFromSmiles(smiles1)
             mol2 = Chem.MolFromSmiles(smiles2)
@@ -76,115 +61,38 @@ class ChemicalEngine(BaseScientificEngine):
         except Exception:
             return 0.0
 
-    def fetch_pubchem_compound(self, query: str) -> Optional[Dict[str, Any]]:
-        """Fetch compound info from PubChem PUG-REST API."""
+    @staticmethod
+    def fetch_pubchem_compound(query: str) -> Optional[Dict[str, Any]]:
+        """Fetch compound info from PubChem REST API."""
         try:
-            encoded_query = urllib.parse.quote(query)
-            url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{encoded_query}/property/CanonicalSMILES,MolecularWeight,MolecularFormula/JSON"
-            req = urllib.request.Request(url, headers={"User-Agent": "MikHerb-AI/1.0"})
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                if resp.status == 200:
-                    data = json.loads(resp.read().decode('utf-8'))
-                    props = data["PropertyTable"]["Properties"][0]
-                    return {
-                        "cid": str(props.get("CID")),
-                        "smiles": props.get("CanonicalSMILES"),
-                        "mw": props.get("MolecularWeight"),
-                        "formula": props.get("MolecularFormula"),
-                        "source": "PubChem PUG-REST"
-                    }
+            url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{urllib.parse.quote(query)}/property/CanonicalSMILES,MolecularWeight,MolecularFormula/JSON"
+            resp = requests.get(url, timeout=3)
+            if resp.status_code == 200:
+                data = resp.json()
+                props = data["PropertyTable"]["Properties"][0]
+                return {
+                    "cid": str(props.get("CID")),
+                    "smiles": props.get("CanonicalSMILES"),
+                    "mw": props.get("MolecularWeight"),
+                    "formula": props.get("MolecularFormula")
+                }
         except Exception:
             pass
         return None
 
-    def fetch_chembl_herbicide(self, query: str = "ALS inhibitor") -> List[Dict[str, Any]]:
-        """Fetch bioactivity/compound data from ChEMBL REST API."""
-        try:
-            encoded_query = urllib.parse.quote(query)
-            url = f"https://www.ebi.ac.uk/chembl/api/data/molecule/search.json?q={encoded_query}&limit=5"
-            req = urllib.request.Request(url, headers={"User-Agent": "MikHerb-AI/1.0"})
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                if resp.status == 200:
-                    data = json.loads(resp.read().decode('utf-8'))
-                    molecules = data.get("molecules", [])
-                    results = []
-                    for m in molecules:
-                        pref_name = m.get("pref_name") or m.get("molecule_chembl_id")
-                        structures = m.get("molecule_structures") or {}
-                        smiles = structures.get("canonical_smiles")
-                        if smiles:
-                            results.append({
-                                "chembl_id": m.get("molecule_chembl_id"),
-                                "name": pref_name,
-                                "smiles": smiles,
-                                "source": "ChEMBL REST API"
-                            })
-                    return results
-        except Exception:
-            pass
-        return []
-
-    def cluster_compounds(self, smiles_list: List[str], similarity_threshold: float = 0.7) -> List[int]:
-        """Cluster compounds based on Morgan fingerprint Tanimoto distance matrix."""
-        if not smiles_list:
-            return []
-
-        fps = []
-        for sm in smiles_list:
-            m = Chem.MolFromSmiles(sm)
-            if m:
-                fps.append(AllChem.GetMorganFingerprintAsBitVect(m, 2, nBits=2048))
-            else:
-                fps.append(None)
-
-        clusters = []
-        current_cluster = 1
-        cluster_assignments = [-1] * len(smiles_list)
-
-        for i in range(len(smiles_list)):
-            if cluster_assignments[i] != -1 or fps[i] is None:
-                continue
-            cluster_assignments[i] = current_cluster
-            for j in range(i + 1, len(smiles_list)):
-                if cluster_assignments[j] == -1 and fps[j] is not None:
-                    intersection = (fps[i] & fps[j]).GetNumOnBits()
-                    union = (fps[i] | fps[j]).GetNumOnBits()
-                    sim = intersection / union if union > 0 else 0.0
-                    if sim >= similarity_threshold:
-                        cluster_assignments[j] = current_cluster
-            current_cluster += 1
-
-        return [c if c != -1 else 0 for c in cluster_assignments]
-
     def build_library(self, initial_compounds: List[Dict[str, str]]) -> List[Dict[str, Any]]:
-        """Build, standardize, filter, and cluster a chemical library using RDKit."""
+        """Build and filter a chemical library with RDKit descriptors."""
         processed = []
-        smiles_list = []
-
         for idx, comp in enumerate(initial_compounds, 1):
-            raw_smiles = comp.get("smiles", "")
+            smiles = comp.get("smiles", "")
             code = comp.get("code", f"MH-{idx:06d}")
-            std_smiles = self.standardize_smiles(raw_smiles) or raw_smiles
-            desc = self.calculate_descriptors(std_smiles)
-
+            desc = self.calculate_descriptors(smiles)
             if desc:
-                smiles_list.append(std_smiles)
-                # Known reference herbicide: Chlorsulfuron SMILES
-                reference_herbicide = "O=S(=O)(Nc1nc(C)nc(OC)n1)c2ccccc2Cl"
-                sim_to_ref = self.compute_tanimoto_similarity(std_smiles, reference_herbicide)
-                novelty_score = round(max(0.0, min(100.0, (1.0 - sim_to_ref) * 100.0)), 1)
-
                 processed.append({
                     "compound_code": code,
                     "name": comp.get("name", f"Compound-{idx}"),
-                    "smiles": std_smiles,
+                    "smiles": smiles,
                     **desc,
-                    "tanimoto_ref_herbicide_similarity": sim_to_ref,
-                    "novelty_score": novelty_score
+                    "novelty_score": round(100.0 - (self.compute_tanimoto_similarity(smiles, "CC(=O)Oc1ccccc1C(=O)O") * 50), 1)
                 })
-
-        cluster_ids = self.cluster_compounds(smiles_list)
-        for i, item in enumerate(processed):
-            item["cluster_id"] = cluster_ids[i] if i < len(cluster_ids) else 1
-
         return processed

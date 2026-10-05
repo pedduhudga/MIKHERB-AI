@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.hardware import check_hardware_status
-from app.engines.status_manager import get_global_engine_manager
 from app.db.database import get_db, engine, Base
 from app.models.models import Project, PipelineStage, TargetProtein, Compound, Candidate, Formulation, ExperimentTrial, AIModelRegistry
 from app.schemas.schemas import (
@@ -55,11 +54,6 @@ agent_service = AIResearchAgent()
 @app.get("/api/v1/system/hardware")
 def get_hardware_status():
     return check_hardware_status()
-
-@app.get("/api/v1/system/engines")
-def get_scientific_engines_status():
-    manager = get_global_engine_manager()
-    return manager.get_engine_statuses()
 
 # Projects & Pipeline
 @app.post("/api/v1/projects", response_model=ProjectResponse)

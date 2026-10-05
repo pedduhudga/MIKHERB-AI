@@ -1,26 +1,31 @@
+import os
 import pytest
-from app.engines.protein_engine import ProteinEngine
+from app.engines.protein_engine import ProteinEngine, P2RankPocketPredictor
 from app.engines.chemical_engine import ChemicalEngine
 from app.engines.docking_engine import AIDockingEngine
 from app.engines.selectivity_engine import CropSelectivityEngine
 from app.engines.formulation_engine import FormulationEngine
 from app.engines.consensus_engine import MikHerbConsensusScoreEngine
-from app.engines.status_manager import get_global_engine_manager
 from app.services.statistics_service import StatisticalAnalyzer
 
-def test_engine_status_manager():
-    manager = get_global_engine_manager()
-    statuses = manager.get_engine_statuses()
-    assert statuses["total_engines"] == 11
-    assert statuses["engines"]["rdkit"]["status"] == "READY"
-    assert statuses["engines"]["uniprot"]["status"] == "READY"
-
-def test_protein_engine():
+def test_protein_engine_real_fetch():
     pe = ProteinEngine()
     data = pe.get_protein_info("P10324", "ALS Weed Target")
-    assert data["uniprot_id"] is not None
+    assert data["uniprot_id"] == "P10324"
+    assert len(data["sequence"]) > 0
+    assert os.path.exists(data["pdb_path"])
     assert len(data["pockets"]) > 0
-    assert data["pLDDT_confidence"] > 80.0
+
+def test_p2rank_pocket_predictor_real_pdb():
+    pdb_file = "./data/structures/AF-P10324-F1-model_v6.pdb"
+    if not os.path.exists(pdb_file):
+        pe = ProteinEngine()
+        pe.fetch_alphafold_structure("P10324")
+
+    pockets = P2RankPocketPredictor.predict_pockets_from_pdb(pdb_file)
+    assert len(pockets) >= 1
+    assert "center" in pockets[0]
+    assert len(pockets[0]["center"]) == 3
 
 def test_chemical_engine():
     ce = ChemicalEngine()
@@ -30,12 +35,17 @@ def test_chemical_engine():
     assert desc["mw"] > 100.0
     assert desc["lipinski_pass"] is True
 
-def test_docking_engine():
+def test_docking_engine_real_structure():
     de = AIDockingEngine()
-    res = de.screen_candidate("MAATTT", "CC(=O)Oc1ccccc1C(=O)O")
-    assert "boltz" in res
-    assert "gnina" in res
-    assert "pose_agreement" in res
+    pdb_file = "./data/structures/AF-P10324-F1-model_v6.pdb"
+    if not os.path.exists(pdb_file):
+        ProteinEngine().fetch_alphafold_structure("P10324")
+
+    res = de.screen_candidate(pdb_file, "CC(=O)Oc1ccccc1C(=O)O", [-0.988, -1.353, 2.374])
+    assert res["boltz"]["status"] == "COMPLETED"
+    assert res["gnina"]["status"] == "COMPLETED"
+    assert res["gnina"]["affinity_kcal_mol"] is not None
+    assert res["pose_agreement"] in ["HIGH", "MEDIUM", "LOW"]
 
 def test_crop_selectivity_engine():
     se = CropSelectivityEngine()

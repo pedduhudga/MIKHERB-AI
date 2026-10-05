@@ -54,11 +54,15 @@ class AIResearchAgent:
             }
 
         elif "dock" in q_lower or "boltz" in q_lower or "screen" in q_lower:
-            seq = context.get("sequence", "MAATTTTTSSSISFSTKPSAARSSSPRPQHLHHHRRRRQIKSVSVTPAAATTEAAPPAAPPAAP")
+            uniprot_id = context.get("uniprot_id", "P10324")
+            protein_data = self.protein_engine.get_protein_info(uniprot_id)
+            pdb_path = protein_data["pdb_path"]
+            pocket_center = protein_data["pockets"][0]["center"]
             smiles = context.get("smiles", "CC(=O)Oc1ccccc1C(=O)O")
-            res = self.docking_engine.screen_candidate(seq, smiles)
+
+            res = self.docking_engine.screen_candidate(pdb_path, smiles, pocket_center)
             return {
-                "agent_response": f"Completed AI screening with Boltz-2 and GNINA docking. Boltz pKd: {res['boltz']['pKd_predicted']}, GNINA CNN Score: {res['gnina']['cnn_score']}, Pose Agreement: {res['pose_agreement']}.",
+                "agent_response": f"Completed AI screening with Boltz-2 and GNINA docking. Boltz pKd: {res['boltz']['pKd_predicted']}, GNINA Affinity: {res['gnina']['affinity_kcal_mol']} kcal/mol, Pose Agreement: {res['pose_agreement']}.",
                 "tool_executed": "boltz_and_gnina",
                 "output_data": res
             }

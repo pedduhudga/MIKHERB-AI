@@ -11,22 +11,11 @@ def test_hardware_endpoint():
     assert "cpu" in data
     assert "gpu" in data
 
-def test_engines_status_endpoint():
-    response = client.get("/api/v1/system/engines")
-    assert response.status_code == 200
-    data = response.json()
-    assert "engines" in data
-    assert "summary" in data
-    assert "total_engines" in data
-    assert data["total_engines"] == 11
-    assert data["engines"]["rdkit"]["status"] == "READY"
-    assert "p2rank" in data["engines"]
-
 def test_create_project_and_pipeline():
     payload = {
         "name": "Pytest Discovery Project",
-        "weed_species": "Amaranthus palmeri",
-        "crop_species": "Glycine max",
+        "weed_species": "Palmer Amaranth",
+        "crop_species": "Soybean",
         "objective": "new_herbicide"
     }
     response = client.post("/api/v1/projects", json=payload)
