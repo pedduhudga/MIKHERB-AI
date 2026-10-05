@@ -5,6 +5,26 @@ export interface HardwareStatus {
   engines: Record<string, string>;
 }
 
+export interface EngineInfo {
+  engine: string;
+  category: string;
+  status: 'READY' | 'NOT_INSTALLED' | 'LIMITED' | 'SIMULATED';
+  binary_path?: string | null;
+  version: string;
+  capabilities: string[];
+  last_checked: string;
+}
+
+export interface EngineManagerResponse {
+  engines: Record<string, EngineInfo>;
+  summary: {
+    READY: number;
+    NOT_INSTALLED: number;
+    SIMULATED: number;
+  };
+  total_engines: number;
+}
+
 export interface Project {
   id: number;
   name: string;
@@ -23,9 +43,9 @@ export interface Candidate {
   smiles: string;
   target_name: string;
   evidence_level: number;
-  boltz_affinity_score?: number;
-  boltz_confidence?: number;
-  gnina_docking_score?: number;
+  boltz_affinity_score?: number | null;
+  boltz_confidence?: number | null;
+  gnina_docking_score?: number | null;
   pose_agreement: string;
   crop_selectivity_score: number;
   mikherb_score: number;
