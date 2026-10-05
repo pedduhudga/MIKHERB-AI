@@ -2,7 +2,7 @@ import os
 import pytest
 from app.engines.protein_engine import ProteinEngine, P2RankPocketPredictor
 from app.engines.chemical_engine import ChemicalEngine
-from app.engines.docking_engine import AIDockingEngine
+from app.engines.docking_engine import AIDockingEngine, GNINAAdapter, Boltz2Adapter
 from app.engines.selectivity_engine import CropSelectivityEngine
 from app.engines.formulation_engine import FormulationEngine
 from app.engines.consensus_engine import MikHerbConsensusScoreEngine
@@ -54,6 +54,12 @@ def test_docking_engine_status_awareness():
     assert res["gnina"]["status"] in ["COMPLETED", "NOT_INSTALLED", "FAILED_EXECUTION"]
     assert "pose_agreement" in res
 
+def test_consensus_engine_zero_parameters():
+    me = MikHerbConsensusScoreEngine()
+    score_res = me.calculate_score()
+    assert score_res["mikherb_score"] == 0.0
+    assert score_res["status"] == "NO_EVIDENCE_AVAILABLE"
+
 def test_crop_selectivity_engine():
     se = CropSelectivityEngine()
     res = se.evaluate_selectivity("MAATTT", "MAATSS", weed_affinity_pKd=8.5, crop_affinity_pKd=6.2)
@@ -65,11 +71,6 @@ def test_formulation_engine():
     res = fe.analyze_formulation("MH-001", 120.0, "Water", "Tween 80")
     assert res["compatibility_score"] > 50.0
     assert "disclaimer" in res
-
-def test_consensus_score_engine():
-    me = MikHerbConsensusScoreEngine()
-    score_res = me.calculate_score()
-    assert 0 <= score_res["mikherb_score"] <= 100
 
 def test_statistics_service():
     stats = StatisticalAnalyzer.analyze_replicates([80.0, 85.0, 90.0])

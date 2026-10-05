@@ -104,9 +104,10 @@ class GNINAAdapter:
             return {
                 "engine": "GNINA Deep Learning Docking (Not Installed - RDKit 3D Surrogate Used)",
                 "cnn_score": None,
-                "affinity_kcal_mol": fallback_res["affinity_kcal_mol"],
+                "affinity_kcal_mol": None,
+                "surrogate_affinity_kcal_mol": fallback_res["affinity_kcal_mol"],
                 "surrogate_pKd": fallback_res["pKd_predicted"],
-                "pose_confidence": "HIGH" if fallback_res["confidence"] > 80.0 else "MEDIUM",
+                "pose_confidence": None,
                 "pocket_center": pocket_center,
                 "execution_mode": "SURREGATE_HEURISTIC",
                 "status": "NOT_INSTALLED"
@@ -264,8 +265,8 @@ class AIDockingEngine:
         boltz_res = self.boltz.predict_complex(protein_pdb_path, smiles, pocket)
         gnina_res = self.gnina.dock(protein_pdb_path, smiles, pocket)
 
-        boltz_pKd = boltz_res.get("pKd_predicted")
-        gnina_aff = gnina_res.get("affinity_kcal_mol")
+        boltz_pKd = boltz_res.get("pKd_predicted") if boltz_res.get("status") == "COMPLETED" else None
+        gnina_aff = gnina_res.get("affinity_kcal_mol") if gnina_res.get("status") == "COMPLETED" else None
         gnina_pKd = abs(gnina_aff) / 1.363 if gnina_aff is not None else None
 
         if boltz_pKd is not None and gnina_pKd is not None:

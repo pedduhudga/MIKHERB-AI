@@ -315,13 +315,13 @@ export default function App() {
                       <div className="flex items-center gap-2">
                         <span className="font-mono text-emerald-400 font-bold text-xl">{selectedCandidate.compound_code}</span>
                         <span className="bg-sky-500/20 text-sky-400 text-xs px-2 py-0.5 rounded border border-sky-500/30">
-                          Evidence Level {selectedCandidate.evidence_level} — Computational Hypothesis
+                          Evidence Level {selectedCandidate.evidence_level} — {selectedCandidate.evidence_level > 0 ? "Validated Native Result" : "RDKit Surrogate Hypothesis"}
                         </span>
                       </div>
                       <p className="text-xs text-slate-400 mt-1">Target: {selectedCandidate.target_name} | SMILES: <code className="text-slate-300">{selectedCandidate.smiles}</code></p>
                     </div>
                     <div className="text-right">
-                      <div className="text-2xl font-black text-emerald-400">{selectedCandidate.mikherb_score}/100</div>
+                      <div className="text-2xl font-black text-emerald-400">{selectedCandidate.mikherb_score ?? "N/A"}/100</div>
                       <span className="text-xs text-slate-400">MikHerb Score</span>
                     </div>
                   </div>
@@ -330,11 +330,11 @@ export default function App() {
                     <ProteinViewer3D height="220px" />
                     <div className="space-y-3 text-xs bg-slate-950 p-4 rounded-lg border border-slate-800">
                       <h4 className="font-bold text-slate-300 text-sm border-b border-slate-800 pb-1">AI Screening Metrics</h4>
-                      <div className="flex justify-between"><span>Boltz-2 Predicted pKd:</span><strong className="text-emerald-400">{selectedCandidate.boltz_affinity_score || 8.85}</strong></div>
-                      <div className="flex justify-between"><span>Boltz Complex Confidence:</span><strong className="text-slate-200">{selectedCandidate.boltz_confidence || 92.4}%</strong></div>
-                      <div className="flex justify-between"><span>GNINA Docking Score:</span><strong className="text-slate-200">{selectedCandidate.gnina_docking_score || -9.4} kcal/mol</strong></div>
+                      <div className="flex justify-between"><span>Boltz-2 Predicted pKd:</span><strong className="text-emerald-400">{selectedCandidate.boltz_affinity_score ?? "NOT_INSTALLED"}</strong></div>
+                      <div className="flex justify-between"><span>Boltz Complex Confidence:</span><strong className="text-slate-200">{selectedCandidate.boltz_confidence ? `${selectedCandidate.boltz_confidence}%` : "NOT_INSTALLED"}</strong></div>
+                      <div className="flex justify-between"><span>GNINA Docking Score:</span><strong className="text-slate-200">{selectedCandidate.gnina_docking_score ? `${selectedCandidate.gnina_docking_score} kcal/mol` : "NOT_INSTALLED"}</strong></div>
                       <div className="flex justify-between"><span>Pose Agreement:</span><strong className="text-emerald-400">{selectedCandidate.pose_agreement}</strong></div>
-                      <div className="flex justify-between"><span>Crop Selectivity Score:</span><strong className="text-emerald-400">{selectedCandidate.crop_selectivity_score}/100</strong></div>
+                      <div className="flex justify-between"><span>Crop Selectivity Score:</span><strong className="text-emerald-400">{selectedCandidate.crop_selectivity_score ? `${selectedCandidate.crop_selectivity_score}/100` : "NOT_AVAILABLE"}</strong></div>
                       <button
                         onClick={() => alert(`Added ${selectedCandidate.compound_code} to Experimental Queue!`)}
                         className="w-full bg-sky-600 hover:bg-sky-500 text-white font-bold py-2 rounded transition mt-2"
@@ -374,11 +374,11 @@ export default function App() {
                     <ul className="space-y-2 text-xs">
                       <li className="p-2 bg-slate-900 rounded border border-slate-800 flex justify-between">
                         <span><strong>Pocket 1:</strong> Primary Catalytic Triad</span>
-                        <span className="text-emerald-400 font-bold">Druggability: 0.89</span>
+                        <span className="text-emerald-400 font-bold">Status: Native / Geometric Centroid</span>
                       </li>
                       <li className="p-2 bg-slate-900 rounded border border-slate-800 flex justify-between">
                         <span><strong>Pocket 2:</strong> Allosteric Divergent Site</span>
-                        <span className="text-emerald-400 font-bold">Druggability: 0.76</span>
+                        <span className="text-emerald-400 font-bold">Status: Native / Geometric Centroid</span>
                       </li>
                     </ul>
                   </div>
