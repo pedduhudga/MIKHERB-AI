@@ -58,9 +58,17 @@ class TargetProtein(Base):
     target_evidence_confidence = Column(String, nullable=True)  # HIGH, MEDIUM, LOW, HYPOTHESIS_ONLY
     essentiality_status = Column(String, nullable=True)
 
-    # Alignment Provenance
+    # Alignment Provenance & Metrics
+    alignment_status = Column(String, nullable=True)  # COMPLETED, FAILED, NOT_ATTEMPTED
     alignment_method = Column(String, nullable=True)
     alignment_coverage_pct = Column(Float, nullable=True)
+    weed_coverage_pct = Column(Float, nullable=True)
+    crop_coverage_pct = Column(Float, nullable=True)
+    identity_over_aligned_pct = Column(Float, nullable=True)
+
+    # Essentiality evidence stratification
+    essentiality_evidence_level = Column(String, nullable=True)  # SPECIES_SPECIFIC, GENERAL_PLANT_EVIDENCE, PRECLINICAL_HYPOTHESIS, UNKNOWN
+    species_specific_essentiality = Column(Boolean, default=False)
 
     # Target Opportunity Scores — NULL = not measured (not fabricated defaults)
     essentiality_score = Column(Float, nullable=True)

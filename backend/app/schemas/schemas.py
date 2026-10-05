@@ -44,8 +44,14 @@ class TargetProteinResponse(BaseModel):
     target_evidence_score: Optional[float] = None
     target_evidence_confidence: Optional[str] = None
     essentiality_status: Optional[str] = None
+    essentiality_evidence_level: Optional[str] = None
+    species_specific_essentiality: Optional[bool] = False
+    alignment_status: Optional[str] = None
     alignment_method: Optional[str] = None
     alignment_coverage_pct: Optional[float] = None
+    weed_coverage_pct: Optional[float] = None
+    crop_coverage_pct: Optional[float] = None
+    identity_over_aligned_pct: Optional[float] = None
     uniprot_id: Optional[str] = None
     weed_sequence: Optional[str] = None
     crop_homolog_uniprot_id: Optional[str] = None

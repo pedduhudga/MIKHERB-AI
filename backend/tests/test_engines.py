@@ -396,16 +396,35 @@ def test_target_discovery_pairwise_biopython_alignment():
     seq_b = "ABCFGHIJK"
 
     aln = _align_pairwise_biopython(seq_a, seq_b)
+    assert aln["alignment_status"] == "COMPLETED"
     assert aln["sequence_identity"] is not None
     assert aln["alignment_method"] == "Biopython-Needleman-Wunsch-Global"
-    assert aln["alignment_coverage"] is not None
+    assert aln["weed_coverage"] == 100.0  # All 11 residues aligned
+    assert aln["crop_coverage"] == 100.0  # All 9 residues aligned
+    assert aln["identity_over_aligned_positions"] == 100.0  # 9 identical matches / 9 paired non-gap residues
+    assert aln["alignment_coverage"] == 100.0
     assert aln["bit_score"] is not None
     # 9 matching characters out of 11 length = 81.8%
     assert aln["sequence_identity"] == 81.8
 
 
+def test_target_discovery_alignment_failure_handling():
+    """Alignment failure must return status=FAILED and None values, never a silent positional fallback."""
+    from app.engines.target_discovery_engine import _align_pairwise_biopython
+    with patch("Bio.Align.PairwiseAligner", side_effect=RuntimeError("Biopython aligner crash")):
+        aln = _align_pairwise_biopython("ABCDEFGHIJK", "ABCFGHIJK")
+        assert aln["alignment_status"] == "FAILED"
+        assert aln["sequence_identity"] is None
+        assert aln["alignment_coverage"] is None
+        assert aln["weed_coverage"] is None
+        assert aln["crop_coverage"] is None
+        assert aln["identity_over_aligned_positions"] is None
+        assert aln["alignment_method"] is None
+        assert aln["bit_score"] is None
+
+
 def test_target_discovery_provenance_records_present():
-    """Curated accessions must provide structured provenance metadata records."""
+    """Curated accessions must provide structured provenance metadata records with verification."""
     engine = MultiTargetDiscoveryEngine(crop_species="Soybean")
     record = engine._assess_single_target("Palmer Amaranth", TARGET_CATALOGUE[0])
     prov = record.get("weed_accession_provenance")
@@ -414,8 +433,37 @@ def test_target_discovery_provenance_records_present():
     assert prov["accession"] == "A0A890DLI3"
     assert prov["source"] == "UniProt"
     assert prov["source_type"] == "CURATED_MAPPING"
+    assert prov["provenance_status"] in ("VERIFIED", "CURATED_UNVERIFIED")
     assert "retrieved_at" in prov
     assert "reviewed" in prov
+
+
+def test_target_discovery_uniprot_accession_verification_invalid():
+    """Accession verification must flag organism mismatches as INVALID and reject poisoned accessions."""
+    from app.engines.target_discovery_engine import _verify_uniprot_accession
+    # P17597 is Arabidopsis thaliana ALS, not Zea mays
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "entryType": "UniProtKB reviewed (Swiss-Prot)",
+        "organism": {"scientificName": "Arabidopsis thaliana"}
+    }
+    with patch("requests.get", return_value=mock_resp):
+        v_res = _verify_uniprot_accession("P17597", "ALS", "Zea mays")
+        assert v_res["status"] == "INVALID"
+        assert "ORGANISM_MISMATCH" in v_res["reason"]
+
+
+def test_target_discovery_species_specific_essentiality_stratification():
+    """Must separate SPECIES_SPECIFIC from GENERAL_PLANT_EVIDENCE and PRECLINICAL_HYPOTHESIS."""
+    engine = MultiTargetDiscoveryEngine()
+    sp_score = engine._score_essentiality({"essentiality_status": "ESSENTIAL_KNOWN"}, has_weed_evidence=True, evidence_level="SPECIES_SPECIFIC")
+    gen_score = engine._score_essentiality({"essentiality_status": "ESSENTIAL_KNOWN"}, has_weed_evidence=True, evidence_level="GENERAL_PLANT_EVIDENCE")
+    preclin_score = engine._score_essentiality({"essentiality_status": "LIKELY_ESSENTIAL"}, has_weed_evidence=True, evidence_level="PRECLINICAL_HYPOTHESIS")
+    unknown_score = engine._score_essentiality({"essentiality_status": "ESSENTIAL_KNOWN"}, has_weed_evidence=False, evidence_level="UNKNOWN")
+
+    assert sp_score > gen_score > preclin_score
+    assert unknown_score is None
 
 
 def test_target_discovery_alphafold_filter():

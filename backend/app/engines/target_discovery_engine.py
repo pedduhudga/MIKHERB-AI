@@ -39,8 +39,13 @@ def _align_pairwise_biopython(seq_a: str, seq_b: str) -> Dict[str, Any]:
     using Biopython Bio.Align.PairwiseAligner (Needleman-Wunsch algorithm).
     
     Returns:
+        alignment_status: "COMPLETED" or "FAILED"
         sequence_identity: percentage of identical residues across aligned columns
-        alignment_coverage: percentage of weed sequence covered by alignment
+        alignment_coverage: percentage of weed sequence covered by aligned residues
+        weed_coverage: percentage of weed sequence covered by non-gap aligned residues
+        crop_coverage: percentage of crop sequence covered by non-gap aligned residues
+        identity_over_aligned_positions: identity over paired non-gap columns
+        alignment_length: total length of aligned sequences including gaps
         alignment_method: "Biopython-Needleman-Wunsch-Global"
         bit_score: raw alignment score from scoring matrix
         e_value: None (deterministic global dynamic programming)
@@ -49,11 +54,18 @@ def _align_pairwise_biopython(seq_a: str, seq_b: str) -> Dict[str, Any]:
     """
     if not seq_a or not seq_b:
         return {
+            "alignment_status": "NOT_ATTEMPTED",
             "sequence_identity": None,
             "alignment_coverage": None,
+            "weed_coverage": None,
+            "crop_coverage": None,
+            "identity_over_aligned_positions": None,
+            "alignment_length": None,
             "alignment_method": None,
             "bit_score": None,
             "e_value": None,
+            "aligned_weed": None,
+            "aligned_crop": None,
         }
 
     try:
@@ -67,34 +79,49 @@ def _align_pairwise_biopython(seq_a: str, seq_b: str) -> Dict[str, Any]:
 
         alignments = aligner.align(seq_a.strip().upper(), seq_b.strip().upper())
         best = alignments[0]
-        aligned_a, aligned_b = best[0], best[1]
+        aligned_a, aligned_b = str(best[0]), str(best[1])
 
+        aligned_pairs = sum(1 for a, b in zip(aligned_a, aligned_b) if a != '-' and b != '-')
         matches = sum(1 for a, b in zip(aligned_a, aligned_b) if a == b and a != '-' and b != '-')
+        aligned_non_gap_a = sum(1 for a in aligned_a if a != '-')
+        aligned_non_gap_b = sum(1 for b in aligned_b if b != '-')
         max_len = max(len(seq_a), len(seq_b))
+        aln_len = len(aligned_a)
+
         identity_pct = round((matches / max_len) * 100.0, 1) if max_len > 0 else 0.0
-        coverage_pct = round((len(seq_b) / len(seq_a)) * 100.0, 1) if len(seq_a) > 0 else 0.0
+        id_over_aligned_pct = round((matches / aligned_pairs) * 100.0, 1) if aligned_pairs > 0 else 0.0
+        weed_coverage_pct = round((aligned_non_gap_a / len(seq_a)) * 100.0, 1) if len(seq_a) > 0 else 0.0
+        crop_coverage_pct = round((aligned_non_gap_b / len(seq_b)) * 100.0, 1) if len(seq_b) > 0 else 0.0
 
         return {
+            "alignment_status": "COMPLETED",
             "sequence_identity": identity_pct,
-            "alignment_coverage": coverage_pct,
+            "alignment_coverage": weed_coverage_pct,
+            "weed_coverage": weed_coverage_pct,
+            "crop_coverage": crop_coverage_pct,
+            "identity_over_aligned_positions": id_over_aligned_pct,
+            "alignment_length": aln_len,
             "alignment_method": "Biopython-Needleman-Wunsch-Global",
             "bit_score": round(float(best.score), 2),
             "e_value": None,
-            "aligned_weed": str(aligned_a),
-            "aligned_crop": str(aligned_b),
+            "aligned_weed": aligned_a,
+            "aligned_crop": aligned_b,
         }
     except Exception:
-        # Fallback to normalized match calculation if Biopython alignment fails
-        min_len = min(len(seq_a), len(seq_b))
-        max_len = max(len(seq_a), len(seq_b))
-        matches = sum(1 for i in range(min_len) if seq_a[i] == seq_b[i])
-        identity_pct = round((matches / max_len) * 100.0, 1) if max_len > 0 else 0.0
+        # Strictly preserve scientific failure: never substitute a positional fallback score
         return {
-            "sequence_identity": identity_pct,
-            "alignment_coverage": round((len(seq_b) / len(seq_a)) * 100.0, 1) if len(seq_a) > 0 else 0.0,
-            "alignment_method": "Positional-Fallback",
-            "bit_score": float(matches),
+            "alignment_status": "FAILED",
+            "sequence_identity": None,
+            "alignment_coverage": None,
+            "weed_coverage": None,
+            "crop_coverage": None,
+            "identity_over_aligned_positions": None,
+            "alignment_length": None,
+            "alignment_method": None,
+            "bit_score": None,
             "e_value": None,
+            "aligned_weed": None,
+            "aligned_crop": None,
         }
 
 
@@ -227,8 +254,57 @@ TARGET_CATALOGUE = [
 
 
 # ---------------------------------------------------------------------------
-# UniProt search and structure helpers
+# UniProt verification, search, and structure helpers
 # ---------------------------------------------------------------------------
+
+def _verify_uniprot_accession(accession: str, expected_gene: str, expected_species: str, timeout: int = 8) -> Dict[str, Any]:
+    """
+    Verifies that a UniProt accession exists, is active, and matches the expected species.
+    Returns:
+        status: "VERIFIED", "INVALID", or "CURATED_UNVERIFIED"
+        reviewed: bool (True for Swiss-Prot, False for TrEMBL)
+        organism_scientific: str or None
+        reason: str or None
+    """
+    if not accession:
+        return {"status": "INVALID", "reviewed": False, "organism_scientific": None, "reason": "EMPTY_ACCESSION"}
+
+    try:
+        url = f"https://rest.uniprot.org/uniprotkb/{accession.strip().upper()}.json"
+        resp = requests.get(url, timeout=timeout)
+        if resp.status_code == 404:
+            return {"status": "INVALID", "reviewed": False, "organism_scientific": None, "reason": "ACCESSION_NOT_FOUND"}
+        if resp.status_code != 200:
+            return {"status": "CURATED_UNVERIFIED", "reviewed": False, "organism_scientific": None, "reason": f"HTTP_{resp.status_code}"}
+
+        data = resp.json()
+        if data.get("entryType") == "Inactive":
+            return {"status": "INVALID", "reviewed": False, "organism_scientific": None, "reason": "ENTRY_INACTIVE"}
+
+        entry_type_str = data.get("entryType", "")
+        is_reviewed = ("Swiss-Prot" in entry_type_str) or ("reviewed" in entry_type_str.lower() and "unreviewed" not in entry_type_str.lower())
+
+        org_sci = data.get("organism", {}).get("scientificName", "").lower()
+        org_common = data.get("organism", {}).get("commonName", "").lower()
+        expected_tokens = [tok.strip().lower() for tok in expected_species.split() if len(tok) > 2]
+        species_matched = any(tok in org_sci or tok in org_common for tok in expected_tokens) if expected_tokens else True
+
+        if not species_matched:
+            return {
+                "status": "INVALID",
+                "reviewed": is_reviewed,
+                "organism_scientific": data.get("organism", {}).get("scientificName"),
+                "reason": f"ORGANISM_MISMATCH: expected '{expected_species}', found '{org_sci}'"
+            }
+
+        return {
+            "status": "VERIFIED",
+            "reviewed": is_reviewed,
+            "organism_scientific": data.get("organism", {}).get("scientificName"),
+            "reason": None
+        }
+    except Exception as e:
+        return {"status": "CURATED_UNVERIFIED", "reviewed": False, "organism_scientific": None, "reason": str(e)}
 
 def _search_uniprot(species_name: str, gene: str, timeout: int = 10) -> Optional[str]:
     """Search UniProt for a given species + gene; return first active primaryAccession or None."""
@@ -414,28 +490,41 @@ class MultiTargetDiscoveryEngine:
         gene = target_def["gene"]
         weed_canonical = self._canonical_species(weed_species)
 
-        # --- 1. Resolve weed UniProt accession with provenance ---
+        # --- 1. Resolve weed UniProt accession with provenance & verification ---
         weed_provenance: Optional[Dict[str, Any]] = None
         weed_accession: Optional[str] = None
 
         if (gene, weed_canonical) in self.PROVENANCE_REGISTRY:
             weed_provenance = dict(self.PROVENANCE_REGISTRY[(gene, weed_canonical)])
             weed_accession = weed_provenance["accession"]
+            # Verify accession against UniProt
+            v_res = _verify_uniprot_accession(weed_accession, gene, weed_canonical)
+            weed_provenance["provenance_status"] = v_res["status"]
+            if v_res.get("reason"):
+                weed_provenance["verification_detail"] = v_res["reason"]
+            if v_res["status"] == "INVALID":
+                # Do not proceed with an invalid poisoned accession
+                weed_accession = None
         else:
             dyn_acc = _search_uniprot(weed_canonical, gene)
             if not dyn_acc and weed_species.lower() != weed_canonical:
                 dyn_acc = _search_uniprot(weed_species, gene)
             if dyn_acc:
                 weed_accession = dyn_acc
+                v_res = _verify_uniprot_accession(dyn_acc, gene, weed_species)
                 weed_provenance = {
                     "accession": dyn_acc,
                     "source": "UniProt",
                     "source_type": "DYNAMIC_SEARCH",
+                    "provenance_status": v_res["status"],
                     "retrieved_at": "dynamic",
-                    "reviewed": False,
+                    "reviewed": v_res["reviewed"],
                     "species": weed_species,
-                    "gene": gene
+                    "gene": gene,
+                    "verification_detail": v_res.get("reason")
                 }
+                if v_res["status"] == "INVALID":
+                    weed_accession = None
 
         # --- 2. AlphaFold availability + pLDDT ---
         alphafold_available = False
@@ -452,11 +541,18 @@ class MultiTargetDiscoveryEngine:
         crop_provenance: Optional[Dict[str, Any]] = None
         crop_seq: Optional[str] = None
         alignment_info: Dict[str, Any] = {
+            "alignment_status": "NOT_ATTEMPTED",
             "sequence_identity": None,
             "alignment_coverage": None,
+            "weed_coverage": None,
+            "crop_coverage": None,
+            "identity_over_aligned_positions": None,
+            "alignment_length": None,
             "alignment_method": None,
             "bit_score": None,
-            "e_value": None
+            "e_value": None,
+            "aligned_weed": None,
+            "aligned_crop": None,
         }
         crop_divergence: Optional[float] = None
 
@@ -465,21 +561,32 @@ class MultiTargetDiscoveryEngine:
             if (gene, crop_canonical) in self.PROVENANCE_REGISTRY:
                 crop_provenance = dict(self.PROVENANCE_REGISTRY[(gene, crop_canonical)])
                 crop_accession = crop_provenance["accession"]
+                v_crop = _verify_uniprot_accession(crop_accession, gene, crop_canonical)
+                crop_provenance["provenance_status"] = v_crop["status"]
+                if v_crop.get("reason"):
+                    crop_provenance["verification_detail"] = v_crop["reason"]
+                if v_crop["status"] == "INVALID":
+                    crop_accession = None
             else:
                 dyn_crop_acc = _search_uniprot(crop_canonical, gene)
                 if not dyn_crop_acc and self.crop_species.lower() != crop_canonical:
                     dyn_crop_acc = _search_uniprot(self.crop_species, gene)
                 if dyn_crop_acc:
                     crop_accession = dyn_crop_acc
+                    v_crop = _verify_uniprot_accession(dyn_crop_acc, gene, self.crop_species)
                     crop_provenance = {
                         "accession": dyn_crop_acc,
                         "source": "UniProt",
                         "source_type": "DYNAMIC_SEARCH",
+                        "provenance_status": v_crop["status"],
                         "retrieved_at": "dynamic",
-                        "reviewed": False,
+                        "reviewed": v_crop["reviewed"],
                         "species": self.crop_species,
-                        "gene": gene
+                        "gene": gene,
+                        "verification_detail": v_crop.get("reason")
                     }
+                    if v_crop["status"] == "INVALID":
+                        crop_accession = None
 
             if crop_accession:
                 crop_seq = _fetch_fasta_seq(crop_accession)
@@ -488,13 +595,31 @@ class MultiTargetDiscoveryEngine:
                     seq_id = alignment_info.get("sequence_identity")
                     crop_divergence = round(100.0 - seq_id, 1) if seq_id is not None else None
 
-        # --- 5. Evidence & Scoring ---
+        # --- 5. Evidence & Essentiality Level Stratification ---
         essentiality_status = target_def.get("essentiality_status", "UNKNOWN")
         essentiality_evidence = target_def.get("essentiality_evidence", "No evidence recorded.")
         essentiality_source = target_def.get("essentiality_source", "Curated Catalogue")
 
-        # Essentiality score is only derived when weed accession/sequence is verified
-        essentiality_score = self._score_essentiality(target_def, weed_seq is not None or weed_accession is not None)
+        # Determine evidence level: species-specific vs general plant vs preclinical
+        target_present_in_weed = (weed_accession is not None or weed_seq is not None)
+        species_specific_essentiality = False
+        if target_present_in_weed:
+            if gene in ("ALS", "EPSPS", "PPO", "ACCase") and "amaranthus" in weed_canonical:
+                essentiality_evidence_level = "SPECIES_SPECIFIC"
+                species_specific_essentiality = True
+            elif gene in ("DXS",):
+                essentiality_evidence_level = "PRECLINICAL_HYPOTHESIS"
+            else:
+                essentiality_evidence_level = "GENERAL_PLANT_EVIDENCE"
+        else:
+            essentiality_evidence_level = "UNKNOWN"
+
+        # Essentiality score: requires target presence in weed
+        essentiality_score = self._score_essentiality(
+            target_def=target_def,
+            has_weed_evidence=target_present_in_weed,
+            evidence_level=essentiality_evidence_level
+        )
         herbicide_evidence_score = self._score_herbicide_evidence(target_def)
         selectivity_potential_score = self._score_selectivity_potential(target_def, crop_divergence)
         structure_score = self._score_structure(alphafold_available, plddt_avg)
@@ -518,7 +643,7 @@ class MultiTargetDiscoveryEngine:
             herbicide_evidence_score=herbicide_evidence_score,
             selectivity_potential_score=selectivity_potential_score,
             structure_score=structure_score,
-            has_weed_evidence=weed_accession is not None or weed_seq is not None
+            has_weed_evidence=target_present_in_weed
         )
 
         return {
@@ -532,6 +657,7 @@ class MultiTargetDiscoveryEngine:
             "weed_accession_provenance":  weed_provenance,
             "weed_sequence_length":       sequence_length,
             "weed_sequence_available":    weed_seq is not None,
+            "target_present_in_weed":     target_present_in_weed,
             # Structure
             "alphafold_available":        alphafold_available,
             "plddt_avg":                  plddt_avg,
@@ -540,8 +666,13 @@ class MultiTargetDiscoveryEngine:
             "crop_species":               self.crop_species,
             "crop_uniprot_id":            crop_accession,
             "crop_accession_provenance":  crop_provenance,
+            "alignment_status":           alignment_info.get("alignment_status"),
             "sequence_identity_pct":      alignment_info.get("sequence_identity"),
             "alignment_coverage":         alignment_info.get("alignment_coverage"),
+            "weed_coverage_pct":          alignment_info.get("weed_coverage"),
+            "crop_coverage_pct":          alignment_info.get("crop_coverage"),
+            "identity_over_aligned_pct":   alignment_info.get("identity_over_aligned_positions"),
+            "alignment_length":           alignment_info.get("alignment_length"),
             "alignment_method":           alignment_info.get("alignment_method"),
             "bit_score":                  alignment_info.get("bit_score"),
             "e_value":                    alignment_info.get("e_value"),
@@ -557,6 +688,8 @@ class MultiTargetDiscoveryEngine:
             "essentiality_status":        essentiality_status,
             "essentiality_evidence":      essentiality_evidence,
             "essentiality_source":        essentiality_source,
+            "essentiality_evidence_level": essentiality_evidence_level,
+            "species_specific_essentiality": species_specific_essentiality,
             "essentiality_score":         essentiality_score,
             # Component scores
             "herbicide_evidence_score":   herbicide_evidence_score,
@@ -581,18 +714,37 @@ class MultiTargetDiscoveryEngine:
     # -----------------------------------------------------------------------
 
     @staticmethod
-    def _score_essentiality(target_def: Dict[str, Any], has_weed_evidence: bool = True) -> Optional[float]:
+    def _score_essentiality(
+        target_def: Dict[str, Any],
+        has_weed_evidence: bool = True,
+        evidence_level: str = "GENERAL_PLANT_EVIDENCE"
+    ) -> Optional[float]:
         """
         Returns essentiality_score ONLY when empirical weed evidence is present.
         If no weed accession or sequence exists, returns None rather than manufacturing 90.0.
+
+        Distinguishes:
+          - SPECIES_SPECIFIC: Target essentiality confirmed in this specific weed species.
+          - GENERAL_PLANT_EVIDENCE: Essential in plant kingdom, but species-specific trial data not yet published.
+          - PRECLINICAL_HYPOTHESIS: Experimental pathway target.
         """
-        if not has_weed_evidence:
+        if not has_weed_evidence or evidence_level == "UNKNOWN":
             return None
+
         status = target_def.get("essentiality_status", target_def.get("essentiality_tier", "UNKNOWN"))
-        if status in ("ESSENTIAL_KNOWN", "ESSENTIAL_UNIQUE"):
-            return 90.0
-        elif status == "LIKELY_ESSENTIAL":
-            return 70.0
+        if evidence_level == "SPECIES_SPECIFIC":
+            if status in ("ESSENTIAL_KNOWN", "ESSENTIAL_UNIQUE"):
+                return 95.0
+            return 80.0
+        elif evidence_level == "GENERAL_PLANT_EVIDENCE":
+            if status in ("ESSENTIAL_KNOWN", "ESSENTIAL_UNIQUE"):
+                return 85.0
+            elif status == "LIKELY_ESSENTIAL":
+                return 65.0
+            return 40.0
+        elif evidence_level == "PRECLINICAL_HYPOTHESIS":
+            return 50.0
+
         return 40.0
 
     @staticmethod
