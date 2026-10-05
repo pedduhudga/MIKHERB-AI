@@ -85,7 +85,6 @@ class P2RankPocketPredictor:
             except Exception:
                 pass
 
-        # Real Geometric Active Site Centroid Analysis directly on downloaded PDB 3D ATOM coordinates
         atoms = []
         plddt_scores = []
         with open(pdb_filepath, "r") as f:
@@ -130,17 +129,6 @@ class P2RankPocketPredictor:
                 "druggability_score": None,
                 "source": "Geometric Centroid Analysis (P2Rank Binary Not Installed)",
                 "status": "NOT_INSTALLED"
-            },
-            {
-                "pocket_id": 2,
-                "name": "Secondary Surface Site Geometry (P2Rank Binary Not Installed)",
-                "center": [round(c_x + 12.0, 3), round(c_y - 8.0, 3), round(c_z + 5.0, 3)],
-                "score": None,
-                "plddt_avg": round(avg_plddt, 1) if avg_plddt else None,
-                "volume_A3": None,
-                "druggability_score": None,
-                "source": "Geometric Centroid Analysis (P2Rank Binary Not Installed)",
-                "status": "NOT_INSTALLED"
             }
         ]
         return pockets
@@ -153,6 +141,20 @@ class ProteinEngine:
         os.makedirs(self.structures_dir, exist_ok=True)
         self.analyzer = ProteinAnalyzer()
         self.pocket_predictor = P2RankPocketPredictor()
+
+    @staticmethod
+    def search_uniprot_accession(species_name: str, target_gene: str = "ALS") -> Optional[str]:
+        """Dynamically queries UniProt REST API for a given species and target gene."""
+        url = f"https://rest.uniprot.org/uniprotkb/search?query=organism_name:%22{requests.utils.quote(species_name)}%22%20AND%20gene:{requests.utils.quote(target_gene)}&format=json"
+        try:
+            resp = requests.get(url, timeout=10)
+            if resp.status_code == 200:
+                results = resp.json().get("results", [])
+                if results:
+                    return results[0].get("primaryAccession")
+        except Exception:
+            pass
+        return None
 
     def fetch_uniprot_fasta(self, uniprot_id: str) -> str:
         """Fetch real protein FASTA sequence from UniProt REST API."""

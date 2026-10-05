@@ -8,6 +8,13 @@ from rdkit.Chem import Descriptors, Lipinski, AllChem, rdMolDescriptors
 class ChemicalEngine:
     """RDKit-powered chemical intelligence, PubChem/ChEMBL importer, and SDF/CSV parser."""
 
+    REFERENCE_HERBICIDES = {
+        "atrazine": "CCNc1nc(nc(n1)Cl)NC(C)C",
+        "glyphosate": "C(C(=O)O)NCP(=O)(O)O",
+        "2_4_d": "O=C(O)COc1ccc(Cl)cc1Cl",
+        "paraquat": "C[n+]1ccc(cc1)c2cc[n+](C)cc2"
+    }
+
     @staticmethod
     def standardize_smiles(smiles: str) -> Optional[str]:
         try:
@@ -32,7 +39,6 @@ class ChemicalEngine:
         tpsa = Descriptors.TPSA(mol)
         rotatable = Lipinski.NumRotatableBonds(mol)
 
-        # Lipinski Rule of 5
         lipinski_pass = (mw <= 500) and (logp <= 5) and (hbd <= 5) and (hba <= 10)
 
         return {
@@ -103,7 +109,8 @@ class ChemicalEngine:
             code = comp.get("code", f"MH-{idx:06d}")
             desc = self.calculate_descriptors(smiles)
             if desc:
-                sim = self.compute_tanimoto_similarity(smiles, "CC(=O)Oc1ccccc1C(=O)O")
+                # Tanimoto similarity against reference commercial herbicide Atrazine
+                sim = self.compute_tanimoto_similarity(smiles, self.REFERENCE_HERBICIDES["atrazine"])
                 processed.append({
                     "compound_code": code,
                     "name": comp.get("name", f"Compound-{idx}"),

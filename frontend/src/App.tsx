@@ -13,13 +13,11 @@ export default function App() {
   const [, setCandidates] = useState<Candidate[]>([]);
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
 
-  // New Project Form State
   const [newProjName, setNewProjName] = useState('Palmer Amaranth Target-ALS Discovery');
   const [newWeed, setNewWeed] = useState('Palmer Amaranth (Amaranthus palmeri)');
   const [newCrop, setNewCrop] = useState('Soybean (Glycine max)');
   const [newObj, setNewObj] = useState('new_herbicide');
 
-  // Formulation Lab State
   const [formName, setFormName] = useState('MikHerb-EC100 Formulation');
   const [activeIng, setActiveIng] = useState('MH-000127 (ALS Inhibitor)');
   const [conc, setConc] = useState(120);
@@ -27,7 +25,6 @@ export default function App() {
   const [surfactant] = useState('Tween 80');
   const [formResult, setFormResult] = useState<any>(null);
 
-  // Agent Chat State
   const [agentQuery, setAgentQuery] = useState('');
   const [chatLog, setChatLog] = useState<{ role: string; text: string; data?: any }[]>([
     { role: 'agent', text: 'Hello! I am MIKHERB AI Agent. Ask me to run target searches, docking simulations, or formulation compatibility checks.' }
@@ -150,7 +147,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
-      {/* Header */}
       <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur px-6 py-4 flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center gap-3">
           <div className="bg-emerald-500 text-slate-950 p-2 rounded-lg font-black text-xl tracking-wider">
@@ -162,7 +158,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Hardware Status */}
         <div className="flex items-center gap-4 bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-xs">
           <div className="flex items-center gap-2">
             <Cpu className="w-4 h-4 text-emerald-400" />
@@ -184,7 +179,6 @@ export default function App() {
         </div>
       </header>
 
-      {/* Navigation Bar */}
       <nav className="bg-slate-900 border-b border-slate-800 px-6 py-2 flex items-center gap-2 text-sm font-medium">
         {[
           { id: 'DISCOVERY', label: 'Discovery Projects', icon: Play },
@@ -213,13 +207,10 @@ export default function App() {
         })}
       </nav>
 
-      {/* Main Content Area */}
       <main className="flex-1 p-6 max-w-7xl w-full mx-auto space-y-6">
 
-        {/* WORKSPACE: DISCOVERY */}
         {activeTab === 'DISCOVERY' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Create Project Wizard */}
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
               <h2 className="font-bold text-lg text-emerald-400 flex items-center gap-2">
                 <Plus className="w-5 h-5" /> Discovery Project Wizard
@@ -273,7 +264,6 @@ export default function App() {
               </form>
             </div>
 
-            {/* Active Projects & Ranked Candidates List */}
             <div className="lg:col-span-2 space-y-6">
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
                 <h2 className="font-bold text-lg mb-4 text-slate-200">Active Discovery Projects</h2>
@@ -307,7 +297,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Candidate Detail Card */}
               {selectedCandidate && (
                 <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
                   <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -321,7 +310,7 @@ export default function App() {
                       <p className="text-xs text-slate-400 mt-1">Target: {selectedCandidate.target_name} | SMILES: <code className="text-slate-300">{selectedCandidate.smiles}</code></p>
                     </div>
                     <div className="text-right">
-                      <div className="text-2xl font-black text-emerald-400">{selectedCandidate.mikherb_score ?? "N/A"}/100</div>
+                      <div className="text-2xl font-black text-emerald-400">{selectedCandidate.mikherb_score != null ? `${selectedCandidate.mikherb_score}/100` : "NO_EVIDENCE"}</div>
                       <span className="text-xs text-slate-400">MikHerb Score</span>
                     </div>
                   </div>
@@ -330,11 +319,11 @@ export default function App() {
                     <ProteinViewer3D height="220px" />
                     <div className="space-y-3 text-xs bg-slate-950 p-4 rounded-lg border border-slate-800">
                       <h4 className="font-bold text-slate-300 text-sm border-b border-slate-800 pb-1">AI Screening Metrics</h4>
-                      <div className="flex justify-between"><span>Boltz-2 Predicted pKd:</span><strong className="text-emerald-400">{selectedCandidate.boltz_affinity_score ?? "NOT_INSTALLED"}</strong></div>
-                      <div className="flex justify-between"><span>Boltz Complex Confidence:</span><strong className="text-slate-200">{selectedCandidate.boltz_confidence ? `${selectedCandidate.boltz_confidence}%` : "NOT_INSTALLED"}</strong></div>
-                      <div className="flex justify-between"><span>GNINA Docking Score:</span><strong className="text-slate-200">{selectedCandidate.gnina_docking_score ? `${selectedCandidate.gnina_docking_score} kcal/mol` : "NOT_INSTALLED"}</strong></div>
+                      <div className="flex justify-between"><span>Boltz-2 Predicted pKd:</span><strong className="text-emerald-400">{selectedCandidate.boltz_affinity_score != null ? selectedCandidate.boltz_affinity_score : "NOT_INSTALLED"}</strong></div>
+                      <div className="flex justify-between"><span>Boltz Complex Confidence:</span><strong className="text-slate-200">{selectedCandidate.boltz_confidence != null ? `${selectedCandidate.boltz_confidence}%` : "NOT_INSTALLED"}</strong></div>
+                      <div className="flex justify-between"><span>GNINA Docking Score:</span><strong className="text-slate-200">{selectedCandidate.gnina_docking_score != null ? `${selectedCandidate.gnina_docking_score} kcal/mol` : "NOT_INSTALLED"}</strong></div>
                       <div className="flex justify-between"><span>Pose Agreement:</span><strong className="text-emerald-400">{selectedCandidate.pose_agreement}</strong></div>
-                      <div className="flex justify-between"><span>Crop Selectivity Score:</span><strong className="text-emerald-400">{selectedCandidate.crop_selectivity_score ? `${selectedCandidate.crop_selectivity_score}/100` : "NOT_AVAILABLE"}</strong></div>
+                      <div className="flex justify-between"><span>Crop Selectivity Score:</span><strong className="text-emerald-400">{selectedCandidate.crop_selectivity_score != null ? `${selectedCandidate.crop_selectivity_score}/100` : "NOT_AVAILABLE"}</strong></div>
                       <button
                         onClick={() => alert(`Added ${selectedCandidate.compound_code} to Experimental Queue!`)}
                         className="w-full bg-sky-600 hover:bg-sky-500 text-white font-bold py-2 rounded transition mt-2"
@@ -349,7 +338,6 @@ export default function App() {
           </div>
         )}
 
-        {/* WORKSPACE: TARGETS */}
         {activeTab === 'TARGETS' && (
           <div className="space-y-6">
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
@@ -360,24 +348,20 @@ export default function App() {
                 <ProteinViewer3D height="320px" />
                 <div className="space-y-3 text-sm">
                   <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 space-y-2">
-                    <h3 className="font-bold text-slate-200 text-base">Target Opportunity Score: 88.5 / 100</h3>
+                    <h3 className="font-bold text-slate-200 text-base">Target Opportunity Score: Dynamic UniProt Query</h3>
                     <div className="grid grid-cols-2 gap-2 text-xs text-slate-400">
-                      <div>Essentiality: <strong className="text-slate-200">9.5 / 10</strong></div>
-                      <div>Weed Specificity: <strong className="text-slate-200">8.8 / 10</strong></div>
-                      <div>Crop Divergence: <strong className="text-slate-200">8.2 / 10</strong></div>
-                      <div>pLDDT Structure Confidence: <strong className="text-emerald-400">92.4%</strong></div>
+                      <div>Essentiality: <strong className="text-slate-200">DYNAMIC_UNIPROT</strong></div>
+                      <div>Weed Specificity: <strong className="text-slate-200">DYNAMIC_UNIPROT</strong></div>
+                      <div>Crop Divergence: <strong className="text-slate-200">DYNAMIC_UNIPROT</strong></div>
+                      <div>pLDDT Structure Confidence: <strong className="text-emerald-400">ALPHAFOLD_PDB_3D</strong></div>
                     </div>
                   </div>
 
                   <div className="bg-slate-950 p-4 rounded-lg border border-slate-800">
-                    <h4 className="font-bold text-slate-200 mb-2">Predicted Binding Pockets (P2Rank)</h4>
+                    <h4 className="font-bold text-slate-200 mb-2">Predicted Binding Pockets</h4>
                     <ul className="space-y-2 text-xs">
                       <li className="p-2 bg-slate-900 rounded border border-slate-800 flex justify-between">
-                        <span><strong>Pocket 1:</strong> Primary Catalytic Triad</span>
-                        <span className="text-emerald-400 font-bold">Status: Native / Geometric Centroid</span>
-                      </li>
-                      <li className="p-2 bg-slate-900 rounded border border-slate-800 flex justify-between">
-                        <span><strong>Pocket 2:</strong> Allosteric Divergent Site</span>
+                        <span><strong>Pocket 1:</strong> Active Site Centroid</span>
                         <span className="text-emerald-400 font-bold">Status: Native / Geometric Centroid</span>
                       </li>
                     </ul>
@@ -388,7 +372,6 @@ export default function App() {
           </div>
         )}
 
-        {/* WORKSPACE: FORMULATION */}
         {activeTab === 'FORMULATION' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
@@ -434,7 +417,6 @@ export default function App() {
           </div>
         )}
 
-        {/* WORKSPACE: AI_LAB */}
         {activeTab === 'AI_LAB' && (
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
             <h2 className="font-bold text-xl text-emerald-400 flex items-center gap-2">
@@ -463,7 +445,6 @@ export default function App() {
           </div>
         )}
 
-        {/* WORKSPACE: CHEMISTRY & EXPERIMENTS Placeholder Fallbacks */}
         {(activeTab === 'CHEMISTRY' || activeTab === 'EXPERIMENTS') && (
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 text-center space-y-3">
             <Beaker className="w-12 h-12 text-emerald-400 mx-auto" />

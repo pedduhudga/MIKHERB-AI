@@ -37,12 +37,15 @@ SPECIES_UNIPROT_MAP = {
     "triticum aestivum": "Q41539"
 }
 
-def resolve_uniprot_accession(species_name: str, default_accession: str) -> Optional[str]:
+def resolve_uniprot_accession(species_name: str) -> Optional[str]:
     s_clean = species_name.lower().strip()
     for key, acc in SPECIES_UNIPROT_MAP.items():
         if key in s_clean:
             return acc
-    return default_accession
+
+    # Attempt dynamic UniProt REST search if not in map
+    dynamic_acc = ProteinEngine.search_uniprot_accession(species_name, "ALS")
+    return dynamic_acc
 
 class DiscoveryPipelineRunner:
     def __init__(self, db: Session):
@@ -104,8 +107,11 @@ class DiscoveryPipelineRunner:
         order = stage.stage_order
 
         if order == 1:
-            weed_uniprot = resolve_uniprot_accession(project.weed_species, "P10324")
-            crop_uniprot = resolve_uniprot_accession(project.crop_species, "Q02145")
+            weed_uniprot = resolve_uniprot_accession(project.weed_species)
+            if not weed_uniprot:
+                raise ValueError(f"Target accession unresolved for weed species '{project.weed_species}'. Please provide a valid UniProt ID.")
+
+            crop_uniprot = resolve_uniprot_accession(project.crop_species)
 
             target_info = self.protein_engine.get_protein_info(weed_uniprot, f"{project.weed_species} Primary Target")
 
@@ -202,7 +208,10 @@ class DiscoveryPipelineRunner:
             target = self.db.query(TargetProtein).filter_by(project_id=project.id).first()
             compounds = self.db.query(Compound).all()
 
-            pockets = target.pockets_json or [{"center": [0.0, 0.0, 0.0]}]
+            pockets = target.pockets_json or []
+            if not pockets or not pockets[0].get("center"):
+                return {"status": "POCKET_NOT_AVAILABLE", "docking_completed_count": 0}
+
             pocket_center = pockets[0]["center"]
             weed_pdb_path = target.pdb_id
 
@@ -225,27 +234,25 @@ class DiscoveryPipelineRunner:
             target = self.db.query(TargetProtein).filter_by(project_id=project.id).first()
             compounds = self.db.query(Compound).all()
 
-            weed_pockets = target.pockets_json or [{"center": [0.0, 0.0, 0.0]}]
-            weed_pocket_center = weed_pockets[0]["center"]
+            weed_pockets = target.pockets_json or []
+            weed_pocket_center = weed_pockets[0]["center"] if weed_pockets and weed_pockets[0].get("center") else None
             weed_pdb_path = target.pdb_id
 
             crop_pdb_path = target.analysis_json.get("crop_pdb_path") if target.analysis_json else None
             crop_pockets = target.analysis_json.get("crop_pockets") if target.analysis_json else None
-            crop_pocket_center = crop_pockets[0]["center"] if crop_pockets else None
+            crop_pocket_center = crop_pockets[0]["center"] if crop_pockets and crop_pockets[0].get("center") else None
 
             selectivity_results = []
-            if crop_pdb_path and os.path.exists(crop_pdb_path) and crop_pocket_center and target.crop_sequence:
+            if weed_pocket_center and crop_pdb_path and os.path.exists(crop_pdb_path) and crop_pocket_center and target.crop_sequence:
                 for comp in compounds:
                     weed_dock = self.docking_engine.screen_candidate(weed_pdb_path, comp.smiles, weed_pocket_center)
                     crop_dock = self.docking_engine.screen_candidate(crop_pdb_path, comp.smiles, crop_pocket_center)
 
-                    weed_pKd = weed_dock["boltz"].get("pKd_predicted")
-                    if weed_pKd is None and weed_dock["gnina"].get("affinity_kcal_mol") is not None:
-                        weed_pKd = abs(weed_dock["gnina"]["affinity_kcal_mol"]) / 1.363
+                    weed_pKd = weed_dock["boltz"].get("pKd_predicted") if weed_dock["boltz"].get("status") == "COMPLETED" else None
+                    weed_gnina_aff = weed_dock["gnina"].get("affinity_kcal_mol") if weed_dock["gnina"].get("status") == "COMPLETED" else None
 
-                    crop_pKd = crop_dock["boltz"].get("pKd_predicted")
-                    if crop_pKd is None and crop_dock["gnina"].get("affinity_kcal_mol") is not None:
-                        crop_pKd = abs(crop_dock["gnina"]["affinity_kcal_mol"]) / 1.363
+                    crop_pKd = crop_dock["boltz"].get("pKd_predicted") if crop_dock["boltz"].get("status") == "COMPLETED" else None
+                    crop_gnina_aff = crop_dock["gnina"].get("affinity_kcal_mol") if crop_dock["gnina"].get("status") == "COMPLETED" else None
 
                     if weed_pKd is not None and crop_pKd is not None:
                         sel_res = self.selectivity_engine.evaluate_selectivity(
@@ -253,10 +260,22 @@ class DiscoveryPipelineRunner:
                         )
                         selectivity_results.append({
                             "compound_code": comp.compound_code,
+                            "method": "Boltz-2 pKd Comparison",
                             "weed_pKd": round(weed_pKd, 2),
                             "crop_pKd": round(crop_pKd, 2),
                             "selectivity_score": sel_res["selectivity_score"],
                             "fold_difference": sel_res["selectivity_fold_difference"],
+                            "status": "COMPLETED"
+                        })
+                    elif weed_gnina_aff is not None and crop_gnina_aff is not None:
+                        aff_diff = abs(weed_gnina_aff) - abs(crop_gnina_aff)
+                        sel_score = min(100.0, max(0.0, 50.0 + (aff_diff * 15.0)))
+                        selectivity_results.append({
+                            "compound_code": comp.compound_code,
+                            "method": "GNINA kcal/mol Comparison",
+                            "weed_affinity_kcal": weed_gnina_aff,
+                            "crop_affinity_kcal": crop_gnina_aff,
+                            "selectivity_score": round(sel_score, 1),
                             "status": "COMPLETED"
                         })
                     else:
@@ -313,17 +332,17 @@ class DiscoveryPipelineRunner:
                 for rec in stage6.results_summary["safety_records"]:
                     safety_map[rec["compound_code"]] = rec.get("safety_clean")
 
-            weed_pockets = target.pockets_json or [{"center": [0.0, 0.0, 0.0]}]
-            weed_pocket_center = weed_pockets[0]["center"]
+            weed_pockets = target.pockets_json or []
+            weed_pocket_center = weed_pockets[0]["center"] if weed_pockets and weed_pockets[0].get("center") else [0.0, 0.0, 0.0]
             weed_pdb_path = target.pdb_id
 
             for idx, comp in enumerate(compounds):
                 weed_dock = self.docking_engine.screen_candidate(weed_pdb_path, comp.smiles, weed_pocket_center)
 
-                boltz_pKd = weed_dock["boltz"].get("pKd_predicted")
-                boltz_conf = weed_dock["boltz"].get("complex_confidence_pLDDT")
-                gnina_cnn = weed_dock["gnina"].get("cnn_score")
-                gnina_aff = weed_dock["gnina"].get("affinity_kcal_mol")
+                boltz_pKd = weed_dock["boltz"].get("pKd_predicted") if weed_dock["boltz"].get("status") == "COMPLETED" else None
+                boltz_conf = weed_dock["boltz"].get("complex_confidence_pLDDT") if weed_dock["boltz"].get("status") == "COMPLETED" else None
+                gnina_cnn = weed_dock["gnina"].get("cnn_score") if weed_dock["gnina"].get("status") == "COMPLETED" else None
+                gnina_aff = weed_dock["gnina"].get("affinity_kcal_mol") if weed_dock["gnina"].get("status") == "COMPLETED" else None
 
                 sel_score = selectivity_map.get(comp.compound_code)
                 is_safe = safety_map.get(comp.compound_code)
@@ -360,8 +379,27 @@ class DiscoveryPipelineRunner:
                 self.db.add(candidate)
             self.db.commit()
 
+            cand_data_for_report = [
+                {
+                    "code": c.compound_code,
+                    "target": target.name,
+                    "boltz": c.boltz_affinity_score if c.boltz_affinity_score is not None else "NOT_INSTALLED",
+                    "gnina": f"{c.gnina_docking_score} kcal/mol" if c.gnina_docking_score is not None else "NOT_INSTALLED",
+                    "selectivity": f"{c.crop_selectivity_score}/100" if c.crop_selectivity_score else "N/A",
+                    "score": f"{c.mikherb_score}/100" if c.mikherb_score else "N/A"
+                }
+                for c in db.query(Candidate).filter_by(project_id=project.id).order_by(Candidate.mikherb_score.desc()).all()
+            ]
+
             pdf_path = f"./reports/project_{project.id}_report.pdf"
-            ReportGenerator.generate_pdf_report({"id": project.id, "name": project.name, "weed_species": project.weed_species, "crop_species": project.crop_species, "objective": project.objective}, pdf_path)
+            ReportGenerator.generate_pdf_report({
+                "id": project.id,
+                "name": project.name,
+                "weed_species": project.weed_species,
+                "crop_species": project.crop_species,
+                "objective": project.objective,
+                "candidates": cand_data_for_report
+            }, pdf_path)
 
             prov = generate_provenance_record("pipeline_completed", {"project_id": project.id}, {"project": project.name}, {"report": pdf_path})
             save_provenance_file(f"./data/projects/{project.id}", "provenance.json", prov)

@@ -5,6 +5,7 @@ from app.engines.docking_engine import AIDockingEngine
 from app.engines.selectivity_engine import CropSelectivityEngine
 from app.engines.formulation_engine import FormulationEngine
 from app.engines.consensus_engine import MikHerbConsensusScoreEngine
+from app.engines.status_manager import engine_status_manager
 
 class AIResearchAgent:
     """AI Research Agent executing scientific tools with strict non-fabrication guardrails and input requirements."""
@@ -89,6 +90,17 @@ class AIResearchAgent:
                     "tool_executed": "boltz_and_gnina",
                     "status": "INPUT_REQUIRED"
                 }
+
+            gnina_installed = engine_status_manager.engines["gnina"].is_installed()
+            boltz_installed = engine_status_manager.engines["boltz"].is_installed()
+
+            if not gnina_installed and not boltz_installed:
+                return {
+                    "agent_response": "Docking NOT AVAILABLE: Native GNINA and Boltz-2 engines are not installed in local environment.",
+                    "tool_executed": "boltz_and_gnina",
+                    "status": "NOT_AVAILABLE"
+                }
+
             try:
                 protein_data = self.protein_engine.get_protein_info(uniprot_id)
                 pdb_path = protein_data["pdb_path"]
@@ -96,7 +108,7 @@ class AIResearchAgent:
 
                 res = self.docking_engine.screen_candidate(pdb_path, smiles, pocket_center)
                 return {
-                    "agent_response": f"Completed screening. Boltz pKd: {res['boltz'].get('pKd_predicted') or 'NOT_INSTALLED'}, GNINA Affinity: {res['gnina'].get('affinity_kcal_mol') or 'NOT_INSTALLED'} kcal/mol, Pose Agreement: {res['pose_agreement']}.",
+                    "agent_response": f"Completed native screening. Boltz pKd: {res['boltz'].get('pKd_predicted') or 'NOT_INSTALLED'}, GNINA Affinity: {res['gnina'].get('affinity_kcal_mol') or 'NOT_INSTALLED'} kcal/mol, Pose Agreement: {res['pose_agreement']}.",
                     "tool_executed": "boltz_and_gnina",
                     "output_data": res,
                     "status": "COMPLETED"
