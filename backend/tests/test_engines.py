@@ -2,7 +2,7 @@ import os
 import pytest
 from app.engines.protein_engine import ProteinEngine, P2RankPocketPredictor
 from app.engines.chemical_engine import ChemicalEngine
-from app.engines.docking_engine import AIDockingEngine, GNINAAdapter, Boltz2Adapter
+from app.engines.docking_engine import AIDockingEngine
 from app.engines.selectivity_engine import CropSelectivityEngine
 from app.engines.formulation_engine import FormulationEngine
 from app.engines.consensus_engine import MikHerbConsensusScoreEngine
@@ -25,10 +25,9 @@ def test_protein_engine_real_fetch():
     assert len(data["pockets"]) > 0
 
 def test_p2rank_pocket_predictor_labels():
-    pdb_file = "./data/structures/AF-P10324-F1-model_v6.pdb"
-    if not os.path.exists(pdb_file):
-        pe = ProteinEngine()
-        pe.fetch_alphafold_structure("P10324")
+    pe = ProteinEngine()
+    data = pe.get_protein_info("P10324", "ALS Weed Target")
+    pdb_file = data["pdb_path"]
 
     pockets = P2RankPocketPredictor.predict_pockets_from_pdb(pdb_file)
     assert len(pockets) >= 1
@@ -44,12 +43,13 @@ def test_chemical_engine():
     assert desc["lipinski_pass"] is True
 
 def test_docking_engine_status_awareness():
-    de = AIDockingEngine()
-    pdb_file = "./data/structures/AF-P10324-F1-model_v6.pdb"
-    if not os.path.exists(pdb_file):
-        ProteinEngine().fetch_alphafold_structure("P10324")
+    pe = ProteinEngine()
+    data = pe.get_protein_info("P10324", "ALS Weed Target")
+    pdb_file = data["pdb_path"]
+    pocket_center = data["pockets"][0]["center"]
 
-    res = de.screen_candidate(pdb_file, "CC(=O)Oc1ccccc1C(=O)O", [-0.988, -1.353, 2.374])
+    de = AIDockingEngine()
+    res = de.screen_candidate(pdb_file, "CC(=O)Oc1ccccc1C(=O)O", pocket_center)
     assert res["boltz"]["status"] in ["COMPLETED", "NOT_INSTALLED", "FAILED_EXECUTION"]
     assert res["gnina"]["status"] in ["COMPLETED", "NOT_INSTALLED", "FAILED_EXECUTION"]
     assert "pose_agreement" in res

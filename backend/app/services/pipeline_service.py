@@ -43,7 +43,6 @@ def resolve_uniprot_accession(species_name: str) -> Optional[str]:
         if key in s_clean:
             return acc
 
-    # Attempt dynamic UniProt REST search if not in map
     dynamic_acc = ProteinEngine.search_uniprot_accession(species_name, "ALS")
     return dynamic_acc
 
@@ -109,7 +108,7 @@ class DiscoveryPipelineRunner:
         if order == 1:
             weed_uniprot = resolve_uniprot_accession(project.weed_species)
             if not weed_uniprot:
-                raise ValueError(f"Target accession unresolved for weed species '{project.weed_species}'. Please provide a valid UniProt ID.")
+                raise ValueError(f"Target accession unresolved for weed species '{project.weed_species}'. Please specify a valid UniProt ID.")
 
             crop_uniprot = resolve_uniprot_accession(project.crop_species)
 
@@ -118,14 +117,22 @@ class DiscoveryPipelineRunner:
             crop_pdb_path = None
             crop_seq = None
             crop_pockets = None
+            crop_status = "NOT_ATTEMPTED"
+            crop_error_reason = None
+
             if crop_uniprot:
                 try:
                     crop_info = self.protein_engine.get_protein_info(crop_uniprot, f"{project.crop_species} Homolog Target")
                     crop_seq = crop_info["sequence"]
                     crop_pdb_path = crop_info["pdb_path"]
                     crop_pockets = crop_info["pockets"]
-                except Exception:
-                    pass
+                    crop_status = "FETCH_SUCCESSFUL"
+                except Exception as e:
+                    crop_status = "ALPHAFOLD_STRUCTURE_UNAVAILABLE"
+                    crop_error_reason = str(e)
+            else:
+                crop_status = "CROP_ACCESSION_UNRESOLVED"
+                crop_error_reason = f"No UniProt accession found for crop species '{project.crop_species}'."
 
             plddt_conf = None
             if target_info.get("pockets") and target_info["pockets"][0].get("plddt_avg") is not None:
@@ -145,7 +152,9 @@ class DiscoveryPipelineRunner:
                 analysis_json={
                     **target_info["analysis"],
                     "crop_pdb_path": crop_pdb_path,
-                    "crop_pockets": crop_pockets
+                    "crop_pockets": crop_pockets,
+                    "crop_status": crop_status,
+                    "crop_error_reason": crop_error_reason
                 }
             )
             self.db.add(target)
@@ -156,6 +165,8 @@ class DiscoveryPipelineRunner:
                 "crop_uniprot_id": crop_uniprot,
                 "weed_pdb_path": target_info["pdb_path"],
                 "crop_pdb_path": crop_pdb_path,
+                "crop_status": crop_status,
+                "crop_error_reason": crop_error_reason,
                 "sequence_length": len(target_info["sequence"])
             }
 
@@ -176,9 +187,11 @@ class DiscoveryPipelineRunner:
                 {"code": f"MH-{project.id}005", "name": "MikHerb Candidate Epsilon", "smiles": "CN1C(=O)C2=CC=CC=C2N=C1C3=CC=CC=C3"}
             ]
 
-            glyph_data = self.chemical_engine.fetch_pubchem_compound("Glyphosate")
-            if glyph_data and glyph_data.get("smiles"):
-                seed_compounds.append({"code": f"MH-{project.id}006", "name": "Glyphosate Reference", "smiles": glyph_data["smiles"]})
+            pubchem_queries = ["Glyphosate", "Atrazine", "Imazapyr", "Chlorsulfuron", "Flumioxazin"]
+            for q in pubchem_queries:
+                p_data = self.chemical_engine.fetch_pubchem_compound(q)
+                if p_data and p_data.get("smiles"):
+                    seed_compounds.append({"code": f"MH-{project.id}-{q.upper()}", "name": f"{q} Reference", "smiles": p_data["smiles"]})
 
             library = ChemicalLibrary(name=f"Library for Project {project.name}", compound_count=len(seed_compounds))
             self.db.add(library)
@@ -209,8 +222,12 @@ class DiscoveryPipelineRunner:
             compounds = self.db.query(Compound).all()
 
             pockets = target.pockets_json or []
-            if not pockets or not pockets[0].get("center"):
-                return {"status": "POCKET_NOT_AVAILABLE", "docking_completed_count": 0}
+            if not pockets or not pockets[0].get("center") or pockets[0].get("status") == "NOT_INSTALLED":
+                return {
+                    "status": "P2RANK_POCKET_ENGINE_NOT_INSTALLED",
+                    "docking_completed_count": 0,
+                    "message": "P2Rank native binary not installed. Pocket prediction required before native AI docking."
+                }
 
             pocket_center = pockets[0]["center"]
             weed_pdb_path = target.pdb_id
@@ -235,12 +252,14 @@ class DiscoveryPipelineRunner:
             compounds = self.db.query(Compound).all()
 
             weed_pockets = target.pockets_json or []
-            weed_pocket_center = weed_pockets[0]["center"] if weed_pockets and weed_pockets[0].get("center") else None
+            is_weed_p2rank = weed_pockets and weed_pockets[0].get("status") != "NOT_INSTALLED"
+            weed_pocket_center = weed_pockets[0]["center"] if is_weed_p2rank and weed_pockets[0].get("center") else None
             weed_pdb_path = target.pdb_id
 
             crop_pdb_path = target.analysis_json.get("crop_pdb_path") if target.analysis_json else None
             crop_pockets = target.analysis_json.get("crop_pockets") if target.analysis_json else None
-            crop_pocket_center = crop_pockets[0]["center"] if crop_pockets and crop_pockets[0].get("center") else None
+            is_crop_p2rank = crop_pockets and crop_pockets[0].get("status") != "NOT_INSTALLED"
+            crop_pocket_center = crop_pockets[0]["center"] if is_crop_p2rank and crop_pockets[0].get("center") else None
 
             selectivity_results = []
             if weed_pocket_center and crop_pdb_path and os.path.exists(crop_pdb_path) and crop_pocket_center and target.crop_sequence:
@@ -287,13 +306,15 @@ class DiscoveryPipelineRunner:
                             "status": "SELECTIVITY_NOT_AVAILABLE_MISSING_DOCKING"
                         })
             else:
+                crop_err = target.analysis_json.get("crop_error_reason", "Crop structure or native pocket missing") if target.analysis_json else "Crop structure or native pocket missing"
                 for comp in compounds:
                     selectivity_results.append({
                         "compound_code": comp.compound_code,
                         "weed_pKd": None,
                         "crop_pKd": None,
                         "selectivity_score": None,
-                        "status": "SELECTIVITY_NOT_AVAILABLE_CROP_STRUCTURE_MISSING"
+                        "status": "SELECTIVITY_NOT_AVAILABLE_CROP_STRUCTURE_MISSING",
+                        "reason": crop_err
                     })
 
             return {"dual_docking_selectivity": selectivity_results, "top_selectivity": selectivity_results[0]}
@@ -333,26 +354,33 @@ class DiscoveryPipelineRunner:
                     safety_map[rec["compound_code"]] = rec.get("safety_clean")
 
             weed_pockets = target.pockets_json or []
-            weed_pocket_center = weed_pockets[0]["center"] if weed_pockets and weed_pockets[0].get("center") else [0.0, 0.0, 0.0]
+            is_weed_p2rank = weed_pockets and weed_pockets[0].get("status") != "NOT_INSTALLED"
+            weed_pocket_center = weed_pockets[0]["center"] if is_weed_p2rank and weed_pockets[0].get("center") else None
             weed_pdb_path = target.pdb_id
 
             for idx, comp in enumerate(compounds):
-                weed_dock = self.docking_engine.screen_candidate(weed_pdb_path, comp.smiles, weed_pocket_center)
-
-                boltz_pKd = weed_dock["boltz"].get("pKd_predicted") if weed_dock["boltz"].get("status") == "COMPLETED" else None
-                boltz_conf = weed_dock["boltz"].get("complex_confidence_pLDDT") if weed_dock["boltz"].get("status") == "COMPLETED" else None
-                gnina_cnn = weed_dock["gnina"].get("cnn_score") if weed_dock["gnina"].get("status") == "COMPLETED" else None
-                gnina_aff = weed_dock["gnina"].get("affinity_kcal_mol") if weed_dock["gnina"].get("status") == "COMPLETED" else None
+                if weed_pocket_center:
+                    weed_dock = self.docking_engine.screen_candidate(weed_pdb_path, comp.smiles, weed_pocket_center)
+                    boltz_pKd = weed_dock["boltz"].get("pKd_predicted") if weed_dock["boltz"].get("status") == "COMPLETED" else None
+                    boltz_conf = weed_dock["boltz"].get("complex_confidence_pLDDT") if weed_dock["boltz"].get("status") == "COMPLETED" else None
+                    gnina_cnn = weed_dock["gnina"].get("cnn_score") if weed_dock["gnina"].get("status") == "COMPLETED" else None
+                    gnina_aff = weed_dock["gnina"].get("affinity_kcal_mol") if weed_dock["gnina"].get("status") == "COMPLETED" else None
+                    pose_agree = weed_dock["pose_agreement"]
+                else:
+                    boltz_pKd, boltz_conf, gnina_cnn, gnina_aff = None, None, None, None
+                    pose_agree = "POCKET_NOT_AVAILABLE"
 
                 sel_score = selectivity_map.get(comp.compound_code)
                 is_safe = safety_map.get(comp.compound_code)
 
+                p_conf = target.pockets_json[0].get("plddt_avg") if (is_weed_p2rank and target.pockets_json) else None
+
                 consensus = self.consensus_engine.calculate_score(
                     target_relevance=80.0,
-                    pocket_confidence=target.pockets_json[0].get("plddt_avg") if target.pockets_json else None,
+                    pocket_confidence=p_conf,
                     boltz_pKd=boltz_pKd,
                     gnina_cnn_score=gnina_cnn,
-                    pose_agreement=weed_dock["pose_agreement"],
+                    pose_agreement=pose_agree,
                     crop_selectivity_score=sel_score,
                     physicochemical_pass=comp.lipinski_pass,
                     novelty_score=comp.novelty_score,
@@ -361,6 +389,7 @@ class DiscoveryPipelineRunner:
 
                 has_native_docking = (boltz_pKd is not None) or (gnina_aff is not None)
                 evidence_lvl = 1 if has_native_docking else 0
+                status_tag = "NATIVE_DOCKING_SUPPORTED" if has_native_docking else "HYPOTHESIS_ONLY"
 
                 candidate = Candidate(
                     project_id=project.id,
@@ -371,10 +400,10 @@ class DiscoveryPipelineRunner:
                     boltz_affinity_score=boltz_pKd,
                     boltz_confidence=boltz_conf,
                     gnina_docking_score=gnina_aff,
-                    pose_agreement=weed_dock["pose_agreement"],
+                    pose_agreement=pose_agree,
                     crop_selectivity_score=sel_score if sel_score is not None else 0.0,
                     mikherb_score=consensus["mikherb_score"],
-                    status="screened"
+                    status=status_tag
                 )
                 self.db.add(candidate)
             self.db.commit()
@@ -388,7 +417,7 @@ class DiscoveryPipelineRunner:
                     "selectivity": f"{c.crop_selectivity_score}/100" if c.crop_selectivity_score else "N/A",
                     "score": f"{c.mikherb_score}/100" if c.mikherb_score else "N/A"
                 }
-                for c in db.query(Candidate).filter_by(project_id=project.id).order_by(Candidate.mikherb_score.desc()).all()
+                for c in self.db.query(Candidate).filter_by(project_id=project.id).order_by(Candidate.mikherb_score.desc()).all()
             ]
 
             pdf_path = f"./reports/project_{project.id}_report.pdf"

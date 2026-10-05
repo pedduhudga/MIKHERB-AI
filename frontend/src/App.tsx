@@ -304,7 +304,7 @@ export default function App() {
                       <div className="flex items-center gap-2">
                         <span className="font-mono text-emerald-400 font-bold text-xl">{selectedCandidate.compound_code}</span>
                         <span className="bg-sky-500/20 text-sky-400 text-xs px-2 py-0.5 rounded border border-sky-500/30">
-                          Evidence Level {selectedCandidate.evidence_level} — {selectedCandidate.evidence_level > 0 ? "Validated Native Result" : "RDKit Surrogate Hypothesis"}
+                          Evidence Level {selectedCandidate.evidence_level} — {selectedCandidate.evidence_level > 0 ? "Native Computational Evidence" : "RDKit Surrogate Hypothesis"}
                         </span>
                       </div>
                       <p className="text-xs text-slate-400 mt-1">Target: {selectedCandidate.target_name} | SMILES: <code className="text-slate-300">{selectedCandidate.smiles}</code></p>
