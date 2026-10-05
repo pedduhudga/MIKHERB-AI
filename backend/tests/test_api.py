@@ -163,3 +163,66 @@ def test_candidate_status_codes_in_api():
     finally:
         db.close()
 
+
+def test_project_ownership_multi_tenant_authorization():
+    """Verify that a project created by User A cannot be accessed or modified by User B."""
+    payload = {
+        "name": "User A Private Discovery Project",
+        "weed_species": "Palmer Amaranth",
+        "crop_species": "Soybean",
+        "objective": "new_herbicide"
+    }
+    user_a_headers = {"Authorization": "Bearer test_token_user_a_uid"}
+    user_b_headers = {"Authorization": "Bearer test_token_user_b_uid"}
+
+    # 1. User A creates project
+    create_resp = client.post("/api/v1/projects", json=payload, headers=user_a_headers)
+    assert create_resp.status_code == 200
+    data = create_resp.json()
+    proj_id = data["id"]
+    assert data["owner_uid"] == "user_a_uid"
+
+    # 2. User A can retrieve their own project and stages
+    get_resp_a = client.get(f"/api/v1/projects/{proj_id}", headers=user_a_headers)
+    assert get_resp_a.status_code == 200
+    assert get_resp_a.json()["id"] == proj_id
+
+    stages_resp_a = client.get(f"/api/v1/projects/{proj_id}/stages", headers=user_a_headers)
+    assert stages_resp_a.status_code == 200
+
+    cand_resp_a = client.get(f"/api/v1/projects/{proj_id}/candidates", headers=user_a_headers)
+    assert cand_resp_a.status_code == 200
+
+    # 3. User B is strictly forbidden from accessing User A's project
+    get_resp_b = client.get(f"/api/v1/projects/{proj_id}", headers=user_b_headers)
+    assert get_resp_b.status_code == 403
+    assert "Forbidden" in get_resp_b.json()["detail"]
+
+    stages_resp_b = client.get(f"/api/v1/projects/{proj_id}/stages", headers=user_b_headers)
+    assert stages_resp_b.status_code == 403
+
+    cand_resp_b = client.get(f"/api/v1/projects/{proj_id}/candidates", headers=user_b_headers)
+    assert cand_resp_b.status_code == 403
+
+    run_resp_b = client.post(f"/api/v1/projects/{proj_id}/run", headers=user_b_headers)
+    assert run_resp_b.status_code == 403
+
+
+def test_system_engines_validate_endpoint():
+    """Verify live validation probe endpoint runs across all engines."""
+    resp = client.post("/api/v1/system/engines/validate")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "rdkit" in data
+    assert "gnina" in data
+    assert "boltz" in data
+    assert data["rdkit"]["status"] in ("VALIDATED", "INSTALLED")
+
+
+def test_firebase_auth_production_default(monkeypatch):
+    """Verify that is_auth_required defaults to True in production (when PYTEST_CURRENT_TEST is unset)."""
+    from app.core.firebase import is_auth_required
+    monkeypatch.delenv("REQUIRE_FIREBASE_AUTH", raising=False)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    assert is_auth_required() is True
+

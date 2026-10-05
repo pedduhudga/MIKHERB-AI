@@ -429,7 +429,9 @@ class DiscoveryPipelineRunner:
 
             docking_results = []
             for comp in compounds:
-                res = self.docking_engine.screen_candidate(weed_pdb_path, comp.smiles, pocket_center)
+                res = self.docking_engine.screen_candidate(
+                    weed_pdb_path, comp.smiles, pocket_center, protein_sequence=target.weed_sequence
+                )
                 docking_results.append({
                     "compound_code": comp.compound_code,
                     "smiles": comp.smiles,
@@ -464,8 +466,12 @@ class DiscoveryPipelineRunner:
             selectivity_results = []
             if weed_pocket_center and crop_pdb_path and os.path.exists(crop_pdb_path) and crop_pocket_center and target.crop_sequence:
                 for comp in compounds:
-                    weed_dock = self.docking_engine.screen_candidate(weed_pdb_path, comp.smiles, weed_pocket_center)
-                    crop_dock = self.docking_engine.screen_candidate(crop_pdb_path, comp.smiles, crop_pocket_center)
+                    weed_dock = self.docking_engine.screen_candidate(
+                        weed_pdb_path, comp.smiles, weed_pocket_center, protein_sequence=target.weed_sequence
+                    )
+                    crop_dock = self.docking_engine.screen_candidate(
+                        crop_pdb_path, comp.smiles, crop_pocket_center, protein_sequence=target.crop_sequence
+                    )
 
                     weed_pKd = weed_dock["boltz"].get("pKd_predicted") if weed_dock["boltz"].get("status") == "COMPLETED" else None
                     weed_gnina_aff = weed_dock["gnina"].get("affinity_kcal_mol") if weed_dock["gnina"].get("status") == "COMPLETED" else None
@@ -605,7 +611,9 @@ class DiscoveryPipelineRunner:
 
             for idx, comp in enumerate(compounds):
                 if weed_pocket_center:
-                    weed_dock = self.docking_engine.screen_candidate(weed_pdb_path, comp.smiles, weed_pocket_center)
+                    weed_dock = self.docking_engine.screen_candidate(
+                        weed_pdb_path, comp.smiles, weed_pocket_center, protein_sequence=target.weed_sequence
+                    )
                     boltz_pKd = weed_dock["boltz"].get("pKd_predicted") if weed_dock["boltz"].get("status") == "COMPLETED" else None
                     boltz_conf = weed_dock["boltz"].get("complex_confidence_pLDDT") if weed_dock["boltz"].get("status") == "COMPLETED" else None
                     gnina_cnn = weed_dock["gnina"].get("cnn_score") if weed_dock["gnina"].get("status") == "COMPLETED" else None

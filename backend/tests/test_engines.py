@@ -21,11 +21,12 @@ from unittest.mock import patch, MagicMock
 
 from app.engines.protein_engine import ProteinEngine, P2RankPocketPredictor
 from app.engines.chemical_engine import ChemicalEngine
-from app.engines.docking_engine import AIDockingEngine
+from app.engines.docking_engine import AIDockingEngine, GNINAAdapter, Boltz2Adapter
 from app.engines.selectivity_engine import CropSelectivityEngine
 from app.engines.formulation_engine import FormulationEngine
 from app.engines.consensus_engine import MikHerbConsensusScoreEngine
 from app.engines.target_discovery_engine import MultiTargetDiscoveryEngine, TARGET_CATALOGUE
+from app.engines.base import BaseScientificEngine
 from app.engines.status_manager import engine_status_manager
 from app.services.statistics_service import StatisticalAnalyzer
 
@@ -233,6 +234,253 @@ def test_docking_engine_preserves_actual_status_codes():
     assert res["gnina"]["status"] in valid_gnina_statuses, (
         f"Unexpected GNINA status: {res['gnina']['status']}"
     )
+
+
+def test_gnina_native_execution_and_sdf_parser(tmp_path):
+    """
+    Mock GNINA executable to verify that:
+    1. GNINA receives explicit pocket bounding box (--center_x, --center_y, --center_z, --size_x, --size_y, --size_z)
+    2. GNINA does NOT use --autobox_ligand
+    3. Output SDF is parsed correctly for minimizedAffinity and CNNscore
+    4. Status is COMPLETED and metrics are returned as real numbers
+    """
+    adapter = GNINAAdapter()
+    dummy_pdb = str(tmp_path / "target.pdb")
+    with open(dummy_pdb, "w") as f:
+        f.write("ATOM      1  N   MET A   1      10.000  20.000  30.000  1.00 90.00           N\n")
+
+    executed_cmds = []
+
+    def mock_subprocess_run(cmd, *args, **kwargs):
+        executed_cmds.append(cmd)
+        out_sdf_path = cmd[cmd.index("-o") + 1]
+        sample_sdf = """
+  Mrv2000 05102600002D 1   1.00000     0.00000     0
+ 10 10  0     0  0  0  0  0  0999 V2000
+    0.0000    0.0000    0.0000 C   0  0  0  0  0  0  0  0  0  0  0  0
+M  END
+> <minimizedAffinity>
+-8.74
+
+> <CNNscore>
+0.892
+
+> <CNNaffinity>
+7.15
+
+$$$$
+"""
+        with open(out_sdf_path, "w") as sf:
+            sf.write(sample_sdf)
+        return MagicMock(returncode=0, stdout="GNINA run complete", stderr="")
+
+    with patch("shutil.which", return_value="/usr/local/bin/gnina"), \
+         patch("app.engines.docking_engine.subprocess.run", side_effect=mock_subprocess_run):
+
+        res = adapter.dock(
+            protein_pdb_path=dummy_pdb,
+            smiles="CC(=O)Oc1ccccc1C(=O)O",
+            pocket_center=[14.25, -5.60, 28.10],
+            box_size=[22.0, 20.0, 24.0]
+        )
+
+        assert len(executed_cmds) == 1
+        cmd = executed_cmds[0]
+        # Assert box coordinates passed directly
+        assert "--center_x" in cmd
+        assert cmd[cmd.index("--center_x") + 1] == "14.25"
+        assert "--center_y" in cmd
+        assert cmd[cmd.index("--center_y") + 1] == "-5.6"
+        assert "--center_z" in cmd
+        assert cmd[cmd.index("--center_z") + 1] == "28.1"
+        assert "--size_x" in cmd
+        assert cmd[cmd.index("--size_x") + 1] == "22.0"
+        assert "--size_y" in cmd
+        assert cmd[cmd.index("--size_y") + 1] == "20.0"
+        assert "--size_z" in cmd
+        assert cmd[cmd.index("--size_z") + 1] == "24.0"
+        # Assert autobox_ligand is NOT used
+        assert "--autobox_ligand" not in cmd
+
+        # Assert scientific parsing
+        assert res["status"] == "COMPLETED"
+        assert res["affinity_kcal_mol"] == -8.74
+        assert res["cnn_score"] == 0.892
+        assert res["pose_confidence"] == "HIGH"
+        assert res["execution_mode"] == "NATIVE_BINARY"
+        assert res["docking_box"]["center"] == [14.25, -5.6, 28.1]
+
+
+def test_gnina_native_malformed_sdf_fails_cleanly(tmp_path):
+    """When GNINA finishes with returncode 0 but SDF lacks metrics, return FAILED_OUTPUT_PARSE."""
+    adapter = GNINAAdapter()
+    dummy_pdb = str(tmp_path / "target.pdb")
+    with open(dummy_pdb, "w") as f:
+        f.write("ATOM      1  N   MET A   1      10.000  20.000  30.000  1.00 90.00           N\n")
+
+    def mock_subprocess_run(cmd, *args, **kwargs):
+        out_sdf_path = cmd[cmd.index("-o") + 1]
+        with open(out_sdf_path, "w") as sf:
+            sf.write("$$$$\n")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with patch("shutil.which", return_value="/usr/local/bin/gnina"), \
+         patch("app.engines.docking_engine.subprocess.run", side_effect=mock_subprocess_run):
+
+        res = adapter.dock(dummy_pdb, "CC(=O)Oc1ccccc1C(=O)O", [10.0, 20.0, 30.0])
+        assert res["status"] == "FAILED_OUTPUT_PARSE"
+        assert res["affinity_kcal_mol"] is None
+        assert res["cnn_score"] is None
+
+
+def test_gnina_native_execution_failure(tmp_path):
+    """When GNINA returns non-zero exit code, return FAILED_EXECUTION and all None numbers."""
+    adapter = GNINAAdapter()
+    dummy_pdb = str(tmp_path / "target.pdb")
+    with open(dummy_pdb, "w") as f:
+        f.write("ATOM      1  N   MET A   1      10.000  20.000  30.000  1.00 90.00           N\n")
+
+    def mock_subprocess_run(cmd, *args, **kwargs):
+        return MagicMock(returncode=139, stdout="", stderr="Segmentation fault (core dumped)")
+
+    with patch("shutil.which", return_value="/usr/local/bin/gnina"), \
+         patch("app.engines.docking_engine.subprocess.run", side_effect=mock_subprocess_run):
+
+        res = adapter.dock(dummy_pdb, "CC(=O)Oc1ccccc1C(=O)O", [10.0, 20.0, 30.0])
+        assert res["status"] == "FAILED_EXECUTION"
+        assert res["affinity_kcal_mol"] is None
+        assert res["cnn_score"] is None
+        assert "Segmentation fault" in res["error"]
+
+
+def test_boltz2_native_execution_and_json_parser(tmp_path):
+    """
+    Mock Boltz-2 CLI to verify that:
+    1. Input YAML file is correctly created with sequences and binder properties
+    2. Output JSON confidence and affinity metrics are parsed
+    3. Status is COMPLETED and real predicted pKd / confidence are returned
+    """
+    adapter = Boltz2Adapter()
+    dummy_pdb = str(tmp_path / "target.pdb")
+    with open(dummy_pdb, "w") as f:
+        f.write("ATOM      1  CA  MET A   1      10.000  20.000  30.000  1.00 90.00           C\n")
+
+    executed_cmds = []
+
+    def mock_subprocess_run(cmd, *args, **kwargs):
+        executed_cmds.append(cmd)
+        out_dir = cmd[cmd.index("--out_dir") + 1]
+        preds_dir = os.path.join(out_dir, "predictions", "test_complex")
+        os.makedirs(preds_dir, exist_ok=True)
+
+        conf_file = os.path.join(preds_dir, "confidence_model_0.json")
+        with open(conf_file, "w") as jf:
+            import json
+            json.dump({"complex_plddt": 93.4, "confidence_score": 0.92}, jf)
+
+        aff_file = os.path.join(preds_dir, "affinity_model_0.json")
+        with open(aff_file, "w") as jf:
+            import json
+            json.dump({"affinity_pred_value": -2.5}, jf)
+
+        return MagicMock(returncode=0, stdout="Boltz run completed", stderr="")
+
+    with patch("shutil.which", return_value="/usr/local/bin/boltz"), \
+         patch("app.engines.docking_engine.subprocess.run", side_effect=mock_subprocess_run):
+
+        res = adapter.predict_complex(
+            dummy_pdb,
+            "CC(=O)Oc1ccccc1C(=O)O",
+            pocket_center=[10.0, 20.0, 30.0],
+            protein_sequence="MVKLA"
+        )
+
+        assert len(executed_cmds) == 1
+        cmd = executed_cmds[0]
+        assert cmd[1] == "predict"
+        yaml_path = cmd[2]
+        assert os.path.exists(yaml_path)
+        with open(yaml_path, "r") as yf:
+            content = yf.read()
+            assert "sequence: \"MVKLA\"" in content
+            assert "smiles: \"CC(=O)Oc1ccccc1C(=O)O\"" in content
+
+        assert res["status"] == "COMPLETED"
+        assert res["complex_confidence_pLDDT"] == 93.4
+        assert res["pKd_predicted"] == 8.5
+        assert res["estimated_affinity_nM"] == round(10 ** (9 - 8.5), 1)
+        assert res["execution_mode"] == "NATIVE_BINARY"
+
+
+def test_boltz2_native_malformed_output_fails_cleanly(tmp_path):
+    """When Boltz-2 returns code 0 but prediction JSON is missing or empty, return FAILED_OUTPUT_PARSE."""
+    adapter = Boltz2Adapter()
+    dummy_pdb = str(tmp_path / "target.pdb")
+    with open(dummy_pdb, "w") as f:
+        f.write("ATOM      1  CA  MET A   1      10.000  20.000  30.000  1.00 90.00           C\n")
+
+    def mock_subprocess_run(cmd, *args, **kwargs):
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with patch("shutil.which", return_value="/usr/local/bin/boltz"), \
+         patch("app.engines.docking_engine.subprocess.run", side_effect=mock_subprocess_run):
+
+        res = adapter.predict_complex(dummy_pdb, "CC(=O)Oc1ccccc1C(=O)O", [10.0, 20.0, 30.0])
+        assert res["status"] == "FAILED_OUTPUT_PARSE"
+        assert res["pKd_predicted"] is None
+        assert res["complex_confidence_pLDDT"] is None
+
+
+def test_boltz2_native_execution_failure(tmp_path):
+    """When Boltz-2 binary fails, return FAILED_EXECUTION."""
+    adapter = Boltz2Adapter()
+    dummy_pdb = str(tmp_path / "target.pdb")
+    with open(dummy_pdb, "w") as f:
+        f.write("ATOM      1  CA  MET A   1      10.000  20.000  30.000  1.00 90.00           C\n")
+
+    def mock_subprocess_run(cmd, *args, **kwargs):
+        return MagicMock(returncode=2, stdout="", stderr="boltz: command error")
+
+    with patch("shutil.which", return_value="/usr/local/bin/boltz"), \
+         patch("app.engines.docking_engine.subprocess.run", side_effect=mock_subprocess_run):
+
+        res = adapter.predict_complex(dummy_pdb, "CC(=O)Oc1ccccc1C(=O)O", [10.0, 20.0, 30.0])
+        assert res["status"] == "FAILED_EXECUTION"
+        assert res["pKd_predicted"] is None
+        assert res["complex_confidence_pLDDT"] is None
+
+
+def test_scientific_engine_lifecycle_tiers():
+    """Verify NOT_INSTALLED -> INSTALLED -> VALIDATED -> FAILED status transitions."""
+    # 1. Not installed
+    with patch("shutil.which", return_value=None):
+        eng = BaseScientificEngine("Test Engine", binary_name="fake_tool")
+        status = eng.get_status()
+        assert status["status"] == "NOT_INSTALLED"
+        assert status["installed"] is False
+        assert status["validated"] is False
+
+    # 2. Installed but not yet validated
+    with patch("shutil.which", return_value="/bin/fake_tool"):
+        eng = BaseScientificEngine("Test Engine", binary_name="fake_tool")
+        status = eng.get_status()
+        assert status["status"] == "INSTALLED"
+        assert status["installed"] is True
+        assert status["validated"] is False
+
+        # 3. Successful validation -> VALIDATED
+        with patch("subprocess.run", return_value=MagicMock(returncode=0, stdout="FakeTool v2.1.0\n", stderr="")):
+            v_status = eng.validate()
+            assert v_status["status"] == "VALIDATED"
+            assert v_status["validated"] is True
+            assert v_status["version"] == "FakeTool v2.1.0"
+
+        # 4. Failed validation -> FAILED
+        with patch("subprocess.run", return_value=MagicMock(returncode=1, stdout="", stderr="error: license missing")):
+            f_status = eng.validate()
+            assert f_status["status"] == "FAILED"
+            assert f_status["validated"] is False
+            assert "error: license missing" in f_status["validation_error"]
 
 
 # ---------------------------------------------------------------------------

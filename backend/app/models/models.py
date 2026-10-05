@@ -8,6 +8,7 @@ class Project(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, index=True, nullable=False)
+    owner_uid = Column(String, index=True, nullable=True)
     researcher = Column(String, default="Dr. Miklens Researcher")
     weed_species = Column(String, nullable=False)
     crop_species = Column(String, nullable=False)

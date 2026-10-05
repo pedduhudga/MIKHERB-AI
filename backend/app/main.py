@@ -41,7 +41,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from app.core.firebase import init_firebase, is_firebase_active, get_current_user, sync_db_project_to_firestore
+from app.core.firebase import init_firebase, is_firebase_active, get_current_user, sync_db_project_to_firestore, verify_project_ownership
 
 # Initialize Firebase if credentials exist
 init_firebase()
@@ -66,6 +66,11 @@ def get_hardware_status():
 def get_engines_status():
     return engine_status_manager.get_all_statuses()
 
+@app.post("/api/v1/system/engines/validate")
+def validate_engines():
+    """Live probe validation across all scientific engines."""
+    return engine_status_manager.validate_all()
+
 @app.get("/api/v1/system/firebase")
 def get_firebase_status():
     return {
@@ -81,8 +86,11 @@ def create_project(
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     project_data = project_in.model_dump()
-    if current_user and current_user.get("email"):
-        project_data["researcher"] = current_user.get("email")
+    if current_user:
+        if current_user.get("uid"):
+            project_data["owner_uid"] = current_user.get("uid")
+        if current_user.get("email"):
+            project_data["researcher"] = current_user.get("email")
     db_project = Project(**project_data)
     db.add(db_project)
     db.commit()
@@ -94,18 +102,39 @@ def create_project(
     return db_project
 
 @app.get("/api/v1/projects", response_model=List[ProjectResponse])
-def list_projects(db: Session = Depends(get_db)):
+def list_projects(
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_uid = current_user.get("uid") if current_user else None
+    if user_uid and user_uid != "local_dev_user":
+        return db.query(Project).filter(
+            (Project.owner_uid == user_uid) | (Project.owner_uid == None)
+        ).all()
     return db.query(Project).all()
 
 @app.get("/api/v1/projects/{project_id}", response_model=ProjectResponse)
-def get_project(project_id: int, db: Session = Depends(get_db)):
+def get_project(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     proj = db.query(Project).filter_by(id=project_id).first()
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
+    verify_project_ownership(proj, current_user)
     return proj
 
 @app.get("/api/v1/projects/{project_id}/stages", response_model=List[PipelineStageResponse])
-def get_project_stages(project_id: int, db: Session = Depends(get_db)):
+def get_project_stages(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    proj = db.query(Project).filter_by(id=project_id).first()
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    verify_project_ownership(proj, current_user)
     return db.query(PipelineStage).filter_by(project_id=project_id).order_by(PipelineStage.stage_order).all()
 
 @app.post("/api/v1/projects/{project_id}/run")
@@ -118,6 +147,7 @@ def run_project_discovery(
     proj = db.query(Project).filter_by(id=project_id).first()
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
+    verify_project_ownership(proj, current_user)
 
     proj.status = "running"
     db.commit()
@@ -129,14 +159,28 @@ def run_project_discovery(
 
 # Candidates & Targets
 @app.get("/api/v1/projects/{project_id}/candidates", response_model=List[CandidateResponse])
-def get_project_candidates(project_id: int, db: Session = Depends(get_db)):
+def get_project_candidates(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    proj = db.query(Project).filter_by(id=project_id).first()
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    verify_project_ownership(proj, current_user)
     return db.query(Candidate).filter_by(project_id=project_id).order_by(Candidate.mikherb_score.desc()).all()
 
 @app.get("/api/v1/candidates/{candidate_id}", response_model=CandidateResponse)
-def get_candidate_detail(candidate_id: int, db: Session = Depends(get_db)):
+def get_candidate_detail(
+    candidate_id: int,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     cand = db.query(Candidate).filter_by(id=candidate_id).first()
     if not cand:
         raise HTTPException(status_code=404, detail="Candidate not found")
+    if cand.project:
+        verify_project_ownership(cand.project, current_user)
     return cand
 
 @app.post("/api/v1/candidates/{candidate_id}/add_to_queue")
@@ -148,13 +192,23 @@ def add_candidate_to_experimental_queue(
     cand = db.query(Candidate).filter_by(id=candidate_id).first()
     if not cand:
         raise HTTPException(status_code=404, detail="Candidate not found")
+    if cand.project:
+        verify_project_ownership(cand.project, current_user)
     cand.status = "in_experimental_queue"
     db.commit()
     sync_db_project_to_firestore(cand.project_id, db)
     return {"status": "SUCCESS", "candidate_code": cand.compound_code, "new_status": cand.status}
 
 @app.get("/api/v1/projects/{project_id}/targets", response_model=List[TargetProteinResponse])
-def get_project_targets(project_id: int, db: Session = Depends(get_db)):
+def get_project_targets(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    proj = db.query(Project).filter_by(id=project_id).first()
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    verify_project_ownership(proj, current_user)
     return db.query(TargetProtein).filter_by(project_id=project_id).all()
 
 # Chemical Intelligence

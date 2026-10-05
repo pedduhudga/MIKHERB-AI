@@ -94,10 +94,37 @@ class RDKitShapeBindingEngine:
             "status": "COMPLETED"
         }
 
-class GNINAAdapter:
-    """GNINA deep-learning molecular docking adapter with strict output parsing and zero fake defaults."""
+THREE_TO_ONE = {
+    'ALA': 'A', 'ARG': 'R', 'ASN': 'N', 'ASP': 'D', 'CYS': 'C',
+    'GLU': 'E', 'GLN': 'Q', 'GLY': 'G', 'HIS': 'H', 'ILE': 'I',
+    'LEU': 'L', 'LYS': 'K', 'MET': 'M', 'PHE': 'F', 'PRO': 'P',
+    'SER': 'S', 'THR': 'T', 'TRP': 'W', 'TYR': 'Y', 'VAL': 'V',
+    'SEC': 'U', 'PYL': 'O'
+}
 
-    def dock(self, protein_pdb_path: str, smiles: str, pocket_center: List[float]) -> Dict[str, Any]:
+class GNINAAdapter:
+    """GNINA deep-learning molecular docking adapter with strict pocket coordinates and zero fake defaults."""
+
+    def dock(
+        self,
+        protein_pdb_path: str,
+        smiles: str,
+        pocket_center: List[float],
+        box_size: Optional[List[float]] = None
+    ) -> Dict[str, Any]:
+        if not pocket_center or len(pocket_center) != 3:
+            return {
+                "engine": "GNINA Deep Learning Docking",
+                "status": "POCKET_CENTER_MISSING",
+                "cnn_score": None,
+                "affinity_kcal_mol": None,
+                "docking_box": None,
+                "error": "Valid 3D pocket center coordinates required for GNINA docking."
+            }
+
+        if not box_size or len(box_size) != 3:
+            box_size = [20.0, 20.0, 20.0]
+
         gnina_bin = shutil.which("gnina")
         if not gnina_bin:
             fallback_res = RDKitShapeBindingEngine.calculate_binding_score(protein_pdb_path, smiles, pocket_center)
@@ -107,7 +134,12 @@ class GNINAAdapter:
                 "affinity_kcal_mol": None,
                 "surrogate_heuristic_score": fallback_res,
                 "pose_confidence": None,
-                "pocket_center": pocket_center,
+                "pocket_center": [round(c, 3) for c in pocket_center],
+                "box_size": [round(s, 1) for s in box_size],
+                "docking_box": {
+                    "center": [round(c, 3) for c in pocket_center],
+                    "size": [round(s, 1) for s in box_size]
+                },
                 "execution_mode": "SURROGATE_HEURISTIC",
                 "status": "NOT_INSTALLED"
             }
@@ -121,6 +153,10 @@ class GNINAAdapter:
                     "status": "FAILED_INVALID_SMILES",
                     "cnn_score": None,
                     "affinity_kcal_mol": None,
+                    "docking_box": {
+                        "center": [round(c, 3) for c in pocket_center],
+                        "size": [round(s, 1) for s in box_size]
+                    },
                     "error": "Failed to generate 3D ligand conformer."
                 }
 
@@ -129,8 +165,12 @@ class GNINAAdapter:
                 "-r", protein_pdb_path,
                 "-l", sdf_path,
                 "-o", out_sdf,
-                "--autobox_ligand", sdf_path,
-                "--autobox_add", "8",
+                "--center_x", str(round(pocket_center[0], 3)),
+                "--center_y", str(round(pocket_center[1], 3)),
+                "--center_z", str(round(pocket_center[2], 3)),
+                "--size_x", str(round(box_size[0], 1)),
+                "--size_y", str(round(box_size[1], 1)),
+                "--size_z", str(round(box_size[2], 1)),
                 "--exhaustiveness", "8"
             ]
             try:
@@ -158,7 +198,12 @@ class GNINAAdapter:
                             "cnn_score": cnn_val,
                             "affinity_kcal_mol": affinity_val,
                             "pose_confidence": "HIGH" if cnn_val > 0.8 else "MEDIUM",
-                            "pocket_center": pocket_center,
+                            "pocket_center": [round(c, 3) for c in pocket_center],
+                            "box_size": [round(s, 1) for s in box_size],
+                            "docking_box": {
+                                "center": [round(c, 3) for c in pocket_center],
+                                "size": [round(s, 1) for s in box_size]
+                            },
                             "execution_mode": "NATIVE_BINARY",
                             "status": "COMPLETED"
                         }
@@ -168,14 +213,34 @@ class GNINAAdapter:
                             "status": "FAILED_OUTPUT_PARSE",
                             "cnn_score": None,
                             "affinity_kcal_mol": None,
+                            "docking_box": {
+                                "center": [round(c, 3) for c in pocket_center],
+                                "size": [round(s, 1) for s in box_size]
+                            },
                             "error": "GNINA completed but output metrics could not be parsed."
                         }
+                else:
+                    return {
+                        "engine": "GNINA Native Executable",
+                        "status": "FAILED_EXECUTION",
+                        "cnn_score": None,
+                        "affinity_kcal_mol": None,
+                        "docking_box": {
+                            "center": [round(c, 3) for c in pocket_center],
+                            "size": [round(s, 1) for s in box_size]
+                        },
+                        "error": res.stderr.strip() if res.stderr else f"Exit code {res.returncode}"
+                    }
             except Exception as e:
                 return {
                     "engine": "GNINA Native Executable",
                     "status": "FAILED_EXECUTION",
                     "cnn_score": None,
                     "affinity_kcal_mol": None,
+                    "docking_box": {
+                        "center": [round(c, 3) for c in pocket_center],
+                        "size": [round(s, 1) for s in box_size]
+                    },
                     "error": str(e)
                 }
 
@@ -187,9 +252,43 @@ class GNINAAdapter:
         }
 
 class Boltz2Adapter:
-    """Boltz-2 AI structure & complex affinity engine adapter with strict JSON output parsing and zero fake defaults."""
+    """Boltz-2 AI structure & complex affinity engine adapter with strict YAML input and output parsing."""
 
-    def predict_complex(self, protein_pdb_path: str, smiles: str, pocket_center: List[float]) -> Dict[str, Any]:
+    @staticmethod
+    def extract_sequence_from_pdb(pdb_path: str) -> str:
+        """Extract amino acid sequence from CA atoms in a PDB file."""
+        seq = []
+        last_res_seq = None
+        if os.path.exists(pdb_path):
+            with open(pdb_path, "r") as f:
+                for line in f:
+                    if line.startswith("ATOM") and line[12:16].strip() == "CA":
+                        try:
+                            res_seq = int(line[22:26].strip())
+                            if res_seq != last_res_seq:
+                                res_name = line[17:20].strip()
+                                seq.append(THREE_TO_ONE.get(res_name, "X"))
+                                last_res_seq = res_seq
+                        except (ValueError, IndexError):
+                            continue
+        return "".join(seq)
+
+    def predict_complex(
+        self,
+        protein_pdb_path: str,
+        smiles: str,
+        pocket_center: List[float],
+        protein_sequence: Optional[str] = None
+    ) -> Dict[str, Any]:
+        if not pocket_center or len(pocket_center) != 3:
+            return {
+                "engine": "Boltz-2 AI",
+                "status": "POCKET_CENTER_MISSING",
+                "pKd_predicted": None,
+                "complex_confidence_pLDDT": None,
+                "error": "Valid 3D pocket center coordinates required for Boltz-2 complex prediction."
+            }
+
         boltz_bin = shutil.which("boltz")
         if not boltz_bin:
             fallback_res = RDKitShapeBindingEngine.calculate_binding_score(protein_pdb_path, smiles, pocket_center)
@@ -203,32 +302,83 @@ class Boltz2Adapter:
                 "status": "NOT_INSTALLED"
             }
 
+        seq = protein_sequence or self.extract_sequence_from_pdb(protein_pdb_path)
+        if not seq:
+            seq = "M"
+
         with tempfile.TemporaryDirectory() as tmpdir:
-            cmd = [boltz_bin, "predict", "--structure", protein_pdb_path, "--smiles", smiles, "--out_dir", tmpdir]
+            yaml_path = os.path.join(tmpdir, "boltz_input.yaml")
+            yaml_content = (
+                f"version: 1\n"
+                f"sequences:\n"
+                f"  - protein:\n"
+                f"      id: A\n"
+                f"      sequence: \"{seq}\"\n"
+                f"  - ligand:\n"
+                f"      id: B\n"
+                f"      smiles: \"{smiles}\"\n"
+                f"properties:\n"
+                f"  - affinity:\n"
+                f"      binder: B\n"
+            )
+            with open(yaml_path, "w") as f:
+                f.write(yaml_content)
+
+            cmd = [boltz_bin, "predict", yaml_path, "--out_dir", tmpdir]
             try:
                 res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
                 if res.returncode == 0:
-                    confidence_json = None
+                    plddt = None
+                    pkd = None
+
+                    # Search for confidence and affinity JSON files produced by Boltz-2
                     for root, dirs, files in os.walk(tmpdir):
                         for f in files:
-                            if f.startswith("confidence") and f.endswith(".json"):
-                                confidence_json = os.path.join(root, f)
-                                break
+                            if not f.endswith(".json"):
+                                continue
+                            file_path = os.path.join(root, f)
+                            try:
+                                with open(file_path, "r") as jf:
+                                    data = json.load(jf)
+                                    if not isinstance(data, dict):
+                                        continue
 
-                    if confidence_json and os.path.exists(confidence_json):
-                        with open(confidence_json, "r") as f:
-                            data = json.load(f)
-                            plddt = data.get("plddt", None) or data.get("confidence", None)
-                            pkd = data.get("pKd", None) or data.get("affinity", None)
-                            if plddt is not None and pkd is not None:
-                                return {
-                                    "engine": "Boltz-2 AI Native Executable",
-                                    "pKd_predicted": float(pkd),
-                                    "estimated_affinity_nM": round(10 ** (9 - float(pkd)), 1),
-                                    "complex_confidence_pLDDT": float(plddt),
-                                    "execution_mode": "NATIVE_BINARY",
-                                    "status": "COMPLETED"
-                                }
+                                    # Confidence JSON metrics
+                                    if plddt is None:
+                                        if "complex_plddt" in data:
+                                            plddt = float(data["complex_plddt"])
+                                        elif "confidence_score" in data:
+                                            plddt = float(data["confidence_score"]) * 100.0 if float(data["confidence_score"]) <= 1.0 else float(data["confidence_score"])
+                                        elif "plddt" in data:
+                                            plddt = float(data["plddt"])
+
+                                    # Affinity JSON metrics
+                                    if pkd is None:
+                                        if "pKd" in data:
+                                            pkd = float(data["pKd"])
+                                        elif "affinity" in data:
+                                            pkd = float(data["affinity"])
+                                        elif "affinity_pred_value" in data:
+                                            # Boltz-2 log(IC50 in µM); pKd/pIC50 = 6.0 - log(IC50 µM)
+                                            val = float(data["affinity_pred_value"])
+                                            pkd = round(6.0 - val, 2)
+                                        elif "affinity_pred_value1" in data:
+                                            val1 = float(data["affinity_pred_value1"])
+                                            val2 = float(data.get("affinity_pred_value2", val1))
+                                            avg_val = (val1 + val2) / 2.0
+                                            pkd = round(6.0 - avg_val, 2)
+                            except Exception:
+                                continue
+
+                    if plddt is not None and pkd is not None:
+                        return {
+                            "engine": "Boltz-2 AI Native Executable",
+                            "pKd_predicted": float(pkd),
+                            "estimated_affinity_nM": round(10 ** (9 - float(pkd)), 1),
+                            "complex_confidence_pLDDT": float(plddt),
+                            "execution_mode": "NATIVE_BINARY",
+                            "status": "COMPLETED"
+                        }
 
                     return {
                         "engine": "Boltz-2 AI Native Executable",
@@ -236,6 +386,14 @@ class Boltz2Adapter:
                         "pKd_predicted": None,
                         "complex_confidence_pLDDT": None,
                         "error": "Boltz-2 executed but output prediction JSON was missing or incomplete."
+                    }
+                else:
+                    return {
+                        "engine": "Boltz-2 AI Native Executable",
+                        "status": "FAILED_EXECUTION",
+                        "pKd_predicted": None,
+                        "complex_confidence_pLDDT": None,
+                        "error": res.stderr.strip() if res.stderr else f"Exit code {res.returncode}"
                     }
             except Exception as e:
                 return {
@@ -258,7 +416,14 @@ class AIDockingEngine:
         self.boltz = Boltz2Adapter()
         self.gnina = GNINAAdapter()
 
-    def screen_candidate(self, protein_pdb_path: str, smiles: str, pocket_center: List[float] = None) -> Dict[str, Any]:
+    def screen_candidate(
+        self,
+        protein_pdb_path: str,
+        smiles: str,
+        pocket_center: List[float] = None,
+        box_size: List[float] = None,
+        protein_sequence: str = None
+    ) -> Dict[str, Any]:
         if not pocket_center or len(pocket_center) != 3:
             return {
                 "status": "POCKET_CENTER_MISSING",
@@ -268,8 +433,8 @@ class AIDockingEngine:
                 "pose_agreement": "NOT_AVAILABLE"
             }
 
-        boltz_res = self.boltz.predict_complex(protein_pdb_path, smiles, pocket_center)
-        gnina_res = self.gnina.dock(protein_pdb_path, smiles, pocket_center)
+        boltz_res = self.boltz.predict_complex(protein_pdb_path, smiles, pocket_center, protein_sequence=protein_sequence)
+        gnina_res = self.gnina.dock(protein_pdb_path, smiles, pocket_center, box_size=box_size)
 
         boltz_pKd = boltz_res.get("pKd_predicted") if boltz_res.get("status") == "COMPLETED" else None
         gnina_aff = gnina_res.get("affinity_kcal_mol") if gnina_res.get("status") == "COMPLETED" else None

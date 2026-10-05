@@ -114,7 +114,9 @@ class AIResearchAgent:
                     }
 
                 pocket_center = native_pocket["center"]
-                res = self.docking_engine.screen_candidate(pdb_path, smiles, pocket_center)
+                res = self.docking_engine.screen_candidate(
+                    pdb_path, smiles, pocket_center, protein_sequence=protein_data.get("sequence")
+                )
 
                 b_status = res["boltz"].get("status") == "COMPLETED"
                 g_status = res["gnina"].get("status") == "COMPLETED"

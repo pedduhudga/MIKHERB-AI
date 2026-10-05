@@ -5,6 +5,7 @@ from datetime import datetime
 class ProjectBase(BaseModel):
     name: str
     researcher: str = "Dr. Miklens Researcher"
+    owner_uid: Optional[str] = None
     weed_species: str
     crop_species: str
     objective: str
@@ -15,6 +16,7 @@ class ProjectCreate(ProjectBase):
 
 class ProjectResponse(ProjectBase):
     id: int
+    owner_uid: Optional[str] = None
     status: str
     created_at: datetime
     updated_at: datetime
