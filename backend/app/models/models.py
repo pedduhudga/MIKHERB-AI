@@ -49,14 +49,14 @@ class TargetProtein(Base):
     pdb_id = Column(String, nullable=True)
     alphafold_id = Column(String, nullable=True)
 
-    # Target Opportunity Scores
-    essentiality_score = Column(Float, default=8.0)
-    weed_specificity_score = Column(Float, default=8.5)
-    crop_divergence_score = Column(Float, default=7.5)
-    structure_confidence = Column(Float, default=90.0)  # pLDDT
-    druggability_score = Column(Float, default=8.0)
-    existing_evidence_score = Column(Float, default=7.0)
-    total_opportunity_score = Column(Float, default=80.0)
+    # Target Opportunity Scores — NULL = not measured (not fabricated defaults)
+    essentiality_score = Column(Float, nullable=True)
+    weed_specificity_score = Column(Float, nullable=True)
+    crop_divergence_score = Column(Float, nullable=True)
+    structure_confidence = Column(Float, nullable=True)  # pLDDT from AlphaFold
+    druggability_score = Column(Float, nullable=True)
+    existing_evidence_score = Column(Float, nullable=True)
+    total_opportunity_score = Column(Float, nullable=True)
 
     pockets_json = Column(JSON, nullable=True)
     analysis_json = Column(JSON, nullable=True)
@@ -120,11 +120,11 @@ class Candidate(Base):
     boltz_confidence = Column(Float, nullable=True)
     gnina_docking_score = Column(Float, nullable=True)  # kcal/mol
     diffdock_score = Column(Float, nullable=True)
-    pose_agreement = Column(String, default="HIGH")  # HIGH, MEDIUM, LOW
+    pose_agreement = Column(String, nullable=True)  # HIGH, MEDIUM, LOW, NOT_AVAILABLE
 
-    # Selectivity & Scores
-    crop_selectivity_score = Column(Float, default=75.0)
-    mikherb_score = Column(Float, default=70.0)
+    # Selectivity & Scores — NULL = not computed (scientifically unknown, not zero)
+    crop_selectivity_score = Column(Float, nullable=True)  # None means NOT_AVAILABLE
+    mikherb_score = Column(Float, nullable=True)
 
     status = Column(String, default="screened")  # screened, in_experimental_queue, tested
 
