@@ -9,11 +9,12 @@ from app.engines.chemical_engine import ChemicalEngine
 from app.engines.docking_engine import AIDockingEngine
 from app.engines.selectivity_engine import CropSelectivityEngine
 from app.engines.consensus_engine import MikHerbConsensusScoreEngine
+from app.engines.target_discovery_engine import MultiTargetDiscoveryEngine
 from app.core.provenance import generate_provenance_record, save_provenance_file
 from app.services.report_service import ReportGenerator
 
 DEFAULT_STAGES = [
-    (1, "Target Discovery & Structure Acquisition"),
+    (1, "Multi-Target Discovery & Structure Acquisition"),
     (2, "Binding Pocket Prediction"),
     (3, "Chemical Library Acquisition & RDKit Cleaning"),
     (4, "Boltz-2 & GNINA AI Docking Screening"),
@@ -22,9 +23,12 @@ DEFAULT_STAGES = [
     (7, "Consensus Candidate Ranking & Report Generation")
 ]
 
+# Known UniProt accessions for quick lookup (supplements dynamic UniProt search)
 SPECIES_UNIPROT_MAP = {
-    "palmer amaranth": "P10324",
-    "amaranthus palmeri": "P10324",
+    # Weed targets (ALS gene, for backwards compatibility with Stage 1)
+    "palmer amaranth": "A0A0U2YMX3",
+    "amaranthus palmeri": "A0A0U2YMX3",
+    # Crop homologs (ALS)
     "soybean": "Q02145",
     "glycine max": "Q02145",
     "corn": "P06253",
@@ -37,14 +41,20 @@ SPECIES_UNIPROT_MAP = {
     "triticum aestivum": "Q41539"
 }
 
+# Target gene search priority for single-target fallback
+TARGET_GENE_PRIORITY = ["ALS", "HPPD", "PPO", "EPSPS", "ACCase", "psbA", "PDS", "GS", "DXS"]
+
+
 def resolve_uniprot_accession(species_name: str) -> Optional[str]:
+    """Resolves the primary weed target accession using map lookup, then UniProt multi-gene search."""
     s_clean = species_name.lower().strip()
     for key, acc in SPECIES_UNIPROT_MAP.items():
         if key in s_clean:
             return acc
 
-    dynamic_acc = ProteinEngine.search_uniprot_accession(species_name, "ALS")
-    return dynamic_acc
+    # Dynamic multi-gene search: try each gene in priority order
+    return ProteinEngine.search_uniprot_accession(species_name, TARGET_GENE_PRIORITY)
+
 
 class DiscoveryPipelineRunner:
     def __init__(self, db: Session):
@@ -105,14 +115,77 @@ class DiscoveryPipelineRunner:
     def _execute_stage(self, project: Project, stage: PipelineStage) -> dict:
         order = stage.stage_order
 
+        # ---------------------------------------------------------------
+        # STAGE 1 — Multi-Target Discovery & Structure Acquisition
+        # ---------------------------------------------------------------
         if order == 1:
-            weed_uniprot = resolve_uniprot_accession(project.weed_species)
-            if not weed_uniprot:
-                raise ValueError(f"Target accession unresolved for weed species '{project.weed_species}'. Please specify a valid UniProt ID.")
+            # --- 1a. Discover ALL candidate herbicide targets ---
+            discovery_engine = MultiTargetDiscoveryEngine(crop_species=project.crop_species)
+            all_targets = discovery_engine.discover_targets(
+                weed_species=project.weed_species,
+                max_targets=10,
+                require_alphafold=False,
+            )
 
-            crop_uniprot = resolve_uniprot_accession(project.crop_species)
+            # Store discovery summary in stage results before selecting best
+            target_discovery_summary = [
+                {
+                    "rank": idx + 1,
+                    "gene": t["gene"],
+                    "family": t["family"],
+                    "weed_uniprot_id": t["weed_uniprot_id"],
+                    "alphafold_available": t["alphafold_available"],
+                    "plddt_avg": t["plddt_avg"],
+                    "sequence_identity_pct": t["sequence_identity_pct"],
+                    "crop_divergence_pct": t["crop_divergence_pct"],
+                    "crop_selectivity_potential": t["crop_selectivity_potential"],
+                    "target_opportunity_score": t["target_opportunity_score"],
+                    "herbicide_classes": t["herbicide_classes"],
+                    "resistance_reported": t["resistance_reported"],
+                    "evidence_status": t["evidence_status"],
+                }
+                for idx, t in enumerate(all_targets)
+            ]
 
-            target_info = self.protein_engine.get_protein_info(weed_uniprot, f"{project.weed_species} Primary Target")
+            # --- 1b. Select best validated target with AlphaFold structure ---
+            best_target = None
+            for candidate in all_targets:
+                if candidate.get("weed_uniprot_id") and candidate.get("alphafold_available"):
+                    best_target = candidate
+                    break
+
+            # Fall back to best with UniProt accession (even without AlphaFold)
+            if not best_target:
+                for candidate in all_targets:
+                    if candidate.get("weed_uniprot_id"):
+                        best_target = candidate
+                        break
+
+            if not best_target or not best_target.get("weed_uniprot_id"):
+                raise ValueError(
+                    f"No validated target accession found for weed species '{project.weed_species}'. "
+                    f"Discovered targets: {[t['gene'] for t in all_targets]}. "
+                    "Please verify species name or provide a UniProt ID directly."
+                )
+
+            weed_uniprot = best_target["weed_uniprot_id"]
+            gene_selected = best_target["gene"]
+
+            # --- 1c. Fetch structure and pocket data for the best target ---
+            target_info = self.protein_engine.get_protein_info(
+                weed_uniprot,
+                f"{project.weed_species} {gene_selected} Target"
+            )
+
+            # --- 1d. Crop homolog structure ---
+            crop_uniprot = best_target.get("crop_uniprot_id")
+            if not crop_uniprot:
+                # Fallback: look up in map
+                c_clean = project.crop_species.lower().strip()
+                for key, acc in SPECIES_UNIPROT_MAP.items():
+                    if key in c_clean:
+                        crop_uniprot = acc
+                        break
 
             crop_pdb_path = None
             crop_seq = None
@@ -122,7 +195,7 @@ class DiscoveryPipelineRunner:
 
             if crop_uniprot:
                 try:
-                    crop_info = self.protein_engine.get_protein_info(crop_uniprot, f"{project.crop_species} Homolog Target")
+                    crop_info = self.protein_engine.get_protein_info(crop_uniprot, f"{project.crop_species} Homolog")
                     crop_seq = crop_info["sequence"]
                     crop_pdb_path = crop_info["pdb_path"]
                     crop_pockets = crop_info["pockets"]
@@ -134,9 +207,13 @@ class DiscoveryPipelineRunner:
                 crop_status = "CROP_ACCESSION_UNRESOLVED"
                 crop_error_reason = f"No UniProt accession found for crop species '{project.crop_species}'."
 
-            plddt_conf = None
-            if target_info.get("pockets") and target_info["pockets"][0].get("plddt_avg") is not None:
-                plddt_conf = target_info["pockets"][0]["plddt_avg"]
+            # --- 1e. pLDDT from pockets or AlphaFold API ---
+            plddt_conf = best_target.get("plddt_avg")
+            if plddt_conf is None and target_info.get("pockets"):
+                plddt_conf = target_info["pockets"][0].get("plddt_avg")
+
+            # --- 1f. Compute crop divergence score ---
+            crop_divergence_score = best_target.get("crop_divergence_pct")  # None if unknown
 
             target = TargetProtein(
                 project_id=project.id,
@@ -148,28 +225,46 @@ class DiscoveryPipelineRunner:
                 pdb_id=target_info["pdb_path"],
                 alphafold_id=target_info["alphafold_id"],
                 structure_confidence=plddt_conf,
+                crop_divergence_score=crop_divergence_score,
                 pockets_json=target_info["pockets"],
                 analysis_json={
                     **target_info["analysis"],
+                    "gene_selected": gene_selected,
+                    "gene_family": best_target.get("family"),
+                    "all_targets_discovered": target_discovery_summary,
                     "crop_pdb_path": crop_pdb_path,
                     "crop_pockets": crop_pockets,
                     "crop_status": crop_status,
-                    "crop_error_reason": crop_error_reason
+                    "crop_error_reason": crop_error_reason,
+                    "herbicide_classes": best_target.get("herbicide_classes"),
+                    "resistance_reported": best_target.get("resistance_reported"),
+                    "essentiality_tier": best_target.get("essentiality_tier"),
+                    "sequence_identity_pct": best_target.get("sequence_identity_pct"),
+                    "selectivity_potential": best_target.get("crop_selectivity_potential"),
                 }
             )
             self.db.add(target)
             self.db.commit()
+
             return {
                 "target_id": target.id,
+                "gene_selected": gene_selected,
+                "all_targets_discovered_count": len(all_targets),
+                "targets_with_structure": sum(1 for t in all_targets if t.get("alphafold_available")),
+                "top_ranked_targets": target_discovery_summary[:5],
                 "weed_uniprot_id": target.uniprot_id,
                 "crop_uniprot_id": crop_uniprot,
                 "weed_pdb_path": target_info["pdb_path"],
                 "crop_pdb_path": crop_pdb_path,
                 "crop_status": crop_status,
                 "crop_error_reason": crop_error_reason,
+                "plddt_avg": plddt_conf,
                 "sequence_length": len(target_info["sequence"])
             }
 
+        # ---------------------------------------------------------------
+        # STAGE 2 — Binding Pocket Prediction
+        # ---------------------------------------------------------------
         elif order == 2:
             target = self.db.query(TargetProtein).filter_by(project_id=project.id).first()
             if not target or not target.pdb_id or not os.path.exists(target.pdb_id):
@@ -184,6 +279,9 @@ class DiscoveryPipelineRunner:
                 "message": "P2Rank native pockets predicted successfully" if is_native else "P2Rank binary not installed; heuristic centroid only."
             }
 
+        # ---------------------------------------------------------------
+        # STAGE 3 — Chemical Library Acquisition & RDKit Cleaning
+        # ---------------------------------------------------------------
         elif order == 3:
             real_herbicide_queries = [
                 # ALS / AHAS Inhibitors
@@ -243,7 +341,7 @@ class DiscoveryPipelineRunner:
                     hba=c_data["hba"],
                     tpsa=c_data["tpsa"],
                     lipinski_pass=c_data["lipinski_pass"],
-                    novelty_score=c_data["novelty_score"]
+                    novelty_score=c_data["structural_dissimilarity_score"]  # Use dissimilarity, not novelty alias
                 )
                 self.db.add(comp)
             self.db.commit()
@@ -251,9 +349,12 @@ class DiscoveryPipelineRunner:
                 "library_id": library.id,
                 "compounds_screened": len(processed_comps),
                 "source": "PubChem & Multi-Target Real Chemical Database",
-                "filters_applied": ["Salt Removal", "PAINS Filter", "Lipinski Rule of 5", "Veber Rules", "Morgan Fingerprints"]
+                "filters_applied": ["Salt Removal", "PAINS Filter", "Morgan Fingerprints", "SMILES Deduplication"]
             }
 
+        # ---------------------------------------------------------------
+        # STAGE 4 — Boltz-2 & GNINA AI Docking Screening
+        # ---------------------------------------------------------------
         elif order == 4:
             target = self.db.query(TargetProtein).filter_by(project_id=project.id).first()
             compounds = self.db.query(Compound).all()
@@ -282,8 +383,11 @@ class DiscoveryPipelineRunner:
                     "pose_agreement": res["pose_agreement"],
                     "gnina_mode": res["gnina"].get("execution_mode")
                 })
-            return {"docking_completed_count": len(docking_results), "top_docking": docking_results[0]}
+            return {"docking_completed_count": len(docking_results), "top_docking": docking_results[0] if docking_results else None}
 
+        # ---------------------------------------------------------------
+        # STAGE 5 — Weed vs Crop Selectivity Analysis
+        # ---------------------------------------------------------------
         elif order == 5:
             target = self.db.query(TargetProtein).filter_by(project_id=project.id).first()
             compounds = self.db.query(Compound).all()
@@ -339,7 +443,7 @@ class DiscoveryPipelineRunner:
                             "compound_code": comp.compound_code,
                             "weed_pKd": None,
                             "crop_pKd": None,
-                            "selectivity_score": None,
+                            "selectivity_score": None,  # Preserve None — not 0.0
                             "status": "SELECTIVITY_NOT_AVAILABLE_MISSING_DOCKING"
                         })
             else:
@@ -349,53 +453,94 @@ class DiscoveryPipelineRunner:
                         "compound_code": comp.compound_code,
                         "weed_pKd": None,
                         "crop_pKd": None,
-                        "selectivity_score": None,
+                        "selectivity_score": None,  # Preserve None — scientifically unknown
                         "status": "SELECTIVITY_NOT_AVAILABLE_CROP_STRUCTURE_MISSING",
                         "reason": crop_err
                     })
 
-            return {"dual_docking_selectivity": selectivity_results, "top_selectivity": selectivity_results[0]}
+            return {"dual_docking_selectivity": selectivity_results, "top_selectivity": selectivity_results[0] if selectivity_results else None}
 
+        # ---------------------------------------------------------------
+        # STAGE 6 — Safety, Toxicity & Novelty Screening
+        # ---------------------------------------------------------------
         elif order == 6:
             compounds = self.db.query(Compound).all()
             safety_records = []
             for comp in compounds:
                 logkoc = round(0.81 * (comp.logp or 2.0) + 0.10, 2) if comp.logp is not None else None
                 aquatic_mobility = ("HIGH" if logkoc < 2.0 else "MODERATE") if logkoc is not None else "UNKNOWN"
+
+                # FIX: predictive_flag is NOT used as safety evidence in consensus scoring.
+                # It is preserved as a screening indicator with explicit uncertainty labelling.
+                predictive_aquatic_concern = (
+                    "PREDICTIVE_CONCERN_HIGH_MOBILITY"
+                    if aquatic_mobility == "HIGH"
+                    else ("PREDICTIVE_LOW_CONCERN" if aquatic_mobility == "MODERATE" else "UNKNOWN")
+                )
+
                 safety_records.append({
-                    "compound_code": comp.compound_code,
-                    "safety_status": "PREDICTIVE_SCREEN_ONLY",
-                    "experimental_safety": "UNKNOWN_REQUIRES_ASSAY",
-                    "mammalian_toxicity": "UNKNOWN_REQUIRES_ASSAY",
-                    "bee_pollinator_concern": "UNKNOWN_NO_PUBLIC_ALERT",
+                    "compound_code":                comp.compound_code,
+                    "safety_status":                "PREDICTIVE_SCREEN_ONLY",
+                    "experimental_safety":          "UNKNOWN_REQUIRES_ASSAY",
+                    "mammalian_toxicity":           "UNKNOWN_REQUIRES_ASSAY",
+                    "bee_pollinator_concern":       "UNKNOWN_NO_PUBLIC_ALERT",
                     "aquatic_mobility_LogKoc_prediction": logkoc,
-                    "aquatic_mobility_class": aquatic_mobility,
-                    "structural_dissimilarity": round(comp.novelty_score, 1) if comp.novelty_score is not None else None,
-                    "evidence_level": "PREDICTED_HEURISTIC",
-                    "safety_clean": (aquatic_mobility != "HIGH") and comp.lipinski_pass
+                    "aquatic_mobility_class":       aquatic_mobility,
+                    "predictive_aquatic_concern":   predictive_aquatic_concern,
+                    "structural_dissimilarity":     round(comp.novelty_score, 1) if comp.novelty_score is not None else None,
+                    "evidence_level":               "PREDICTED_HEURISTIC",
+                    # Removed 'safety_clean' boolean — not used as evidence in consensus
                 })
             return {"safety_screened": len(compounds), "safety_records": safety_records}
 
+        # ---------------------------------------------------------------
+        # STAGE 7 — Consensus Candidate Ranking & Report Generation
+        # ---------------------------------------------------------------
         elif order == 7:
             target = self.db.query(TargetProtein).filter_by(project_id=project.id).first()
             compounds = self.db.query(Compound).all()
             stage5 = self.db.query(PipelineStage).filter_by(project_id=project.id, stage_order=5).first()
             stage6 = self.db.query(PipelineStage).filter_by(project_id=project.id, stage_order=6).first()
 
-            selectivity_map = {}
+            selectivity_map: Dict[str, Optional[float]] = {}
             if stage5 and stage5.results_summary and stage5.results_summary.get("dual_docking_selectivity"):
                 for sel in stage5.results_summary["dual_docking_selectivity"]:
-                    selectivity_map[sel["compound_code"]] = sel.get("selectivity_score")
+                    # Preserve None — don't coerce to 0.0
+                    selectivity_map[sel["compound_code"]] = sel.get("selectivity_score")  # may be None
 
-            safety_map = {}
+            # FIX: Safety is NOT fed into consensus as boolean.
+            # Safety flags are preserved as metadata only.
+            safety_metadata_map: Dict[str, dict] = {}
             if stage6 and stage6.results_summary and stage6.results_summary.get("safety_records"):
                 for rec in stage6.results_summary["safety_records"]:
-                    safety_map[rec["compound_code"]] = rec.get("safety_clean")
+                    safety_metadata_map[rec["compound_code"]] = {
+                        "safety_status":        rec.get("safety_status"),
+                        "evidence_level":       rec.get("evidence_level"),
+                        "aquatic_mobility":     rec.get("aquatic_mobility_class"),
+                        "predictive_concern":   rec.get("predictive_aquatic_concern"),
+                    }
 
             weed_pockets = target.pockets_json or []
             is_weed_p2rank = weed_pockets and weed_pockets[0].get("status") == "COMPLETED"
             weed_pocket_center = weed_pockets[0]["center"] if is_weed_p2rank and weed_pockets[0].get("center") else None
             weed_pdb_path = target.pdb_id
+
+            # FIX: target_relevance — only compute if all components are actually measured
+            if (
+                target
+                and target.structure_confidence is not None
+                and target.crop_divergence_score is not None
+                and target.essentiality_score is not None
+            ):
+                dyn_target_relevance = round(
+                    min(100.0, max(0.0,
+                        (target.structure_confidence * 0.4) +
+                        (target.crop_divergence_score * 0.3) +
+                        (target.essentiality_score * 0.3)
+                    )), 1
+                )
+            else:
+                dyn_target_relevance = None  # Unknown — not fabricated
 
             for idx, comp in enumerate(compounds):
                 if weed_pocket_center:
@@ -405,20 +550,22 @@ class DiscoveryPipelineRunner:
                     gnina_cnn = weed_dock["gnina"].get("cnn_score") if weed_dock["gnina"].get("status") == "COMPLETED" else None
                     gnina_aff = weed_dock["gnina"].get("affinity_kcal_mol") if weed_dock["gnina"].get("status") == "COMPLETED" else None
                     pose_agree = weed_dock["pose_agreement"]
+                    # FIX: Preserve actual docking status codes from each engine
+                    boltz_actual_status = weed_dock["boltz"].get("status", "NOT_AVAILABLE")
+                    gnina_actual_status = weed_dock["gnina"].get("status", "NOT_AVAILABLE")
                 else:
                     boltz_pKd, boltz_conf, gnina_cnn, gnina_aff = None, None, None, None
                     pose_agree = "POCKET_NOT_AVAILABLE"
+                    boltz_actual_status = "POCKET_NOT_AVAILABLE"
+                    gnina_actual_status = "POCKET_NOT_AVAILABLE"
 
-                sel_score = selectivity_map.get(comp.compound_code)
-                is_safe = safety_map.get(comp.compound_code)
+                sel_score = selectivity_map.get(comp.compound_code)  # None if not available
+                safety_meta = safety_metadata_map.get(comp.compound_code, {})
 
                 p_conf = target.pockets_json[0].get("plddt_avg") if (is_weed_p2rank and target.pockets_json) else None
 
-                if target and target.structure_confidence is not None and target.crop_divergence_score is not None and target.essentiality_score is not None:
-                    dyn_target_relevance = round(min(100.0, max(0.0, (target.structure_confidence * 0.4) + (target.crop_divergence_score * 0.3) + (target.essentiality_score * 0.3))), 1)
-                else:
-                    dyn_target_relevance = None
-
+                # FIX: consensus engine does NOT receive safety_evidence_clean boolean.
+                # Safety data is preserved as metadata on the candidate, not mixed into ranking.
                 consensus = self.consensus_engine.calculate_score(
                     target_relevance=dyn_target_relevance,
                     pocket_confidence=p_conf,
@@ -428,7 +575,7 @@ class DiscoveryPipelineRunner:
                     crop_selectivity_score=sel_score,
                     physicochemical_pass=comp.lipinski_pass,
                     novelty_score=comp.novelty_score,
-                    safety_evidence_clean=is_safe
+                    safety_evidence_clean=None,  # Not used in ranking — PREDICTIVE_SCREEN_ONLY
                 )
 
                 has_native_docking = (boltz_pKd is not None) or (gnina_aff is not None)
@@ -445,24 +592,36 @@ class DiscoveryPipelineRunner:
                     boltz_confidence=boltz_conf,
                     gnina_docking_score=gnina_aff,
                     pose_agreement=pose_agree,
-                    crop_selectivity_score=sel_score if sel_score is not None else 0.0,
+                    crop_selectivity_score=sel_score,  # Preserved as None if unavailable
                     mikherb_score=consensus["mikherb_score"],
                     status=status_tag
                 )
                 self.db.add(candidate)
             self.db.commit()
 
-            cand_data_for_report = [
-                {
-                    "code": c.compound_code,
-                    "target": target.name,
-                    "boltz": c.boltz_affinity_score if c.boltz_affinity_score is not None else "NOT_INSTALLED",
-                    "gnina": f"{c.gnina_docking_score} kcal/mol" if c.gnina_docking_score is not None else "NOT_INSTALLED",
-                    "selectivity": f"{c.crop_selectivity_score}/100" if c.crop_selectivity_score else "N/A",
-                    "score": f"{c.mikherb_score}/100" if c.mikherb_score else "N/A"
-                }
-                for c in self.db.query(Candidate).filter_by(project_id=project.id).order_by(Candidate.mikherb_score.desc()).all()
-            ]
+            # FIX: Report preserves actual engine status codes, not generic NOT_INSTALLED
+            cand_data_for_report = []
+            for c in self.db.query(Candidate).filter_by(project_id=project.id).order_by(Candidate.mikherb_score.desc()).all():
+                # Re-run docking to get actual status for the report (or fetch from stored data)
+                if weed_pocket_center:
+                    dock_res = self.docking_engine.screen_candidate(weed_pdb_path, c.smiles, weed_pocket_center)
+                    boltz_report_status = dock_res["boltz"].get("status", "NOT_AVAILABLE")
+                    gnina_report_status = dock_res["gnina"].get("status", "NOT_AVAILABLE")
+                else:
+                    boltz_report_status = "POCKET_NOT_AVAILABLE"
+                    gnina_report_status = "POCKET_NOT_AVAILABLE"
+
+                cand_data_for_report.append({
+                    "code":         c.compound_code,
+                    "target":       c.target_name,
+                    "boltz_status": boltz_report_status,
+                    "boltz":        c.boltz_affinity_score if c.boltz_affinity_score is not None else f"[{boltz_report_status}]",
+                    "gnina_status": gnina_report_status,
+                    "gnina":        f"{c.gnina_docking_score} kcal/mol" if c.gnina_docking_score is not None else f"[{gnina_report_status}]",
+                    "selectivity":  f"{c.crop_selectivity_score}/100" if c.crop_selectivity_score is not None else "NOT_AVAILABLE",
+                    "score":        f"{c.mikherb_score}/100" if c.mikherb_score else "N/A",
+                    "safety_metadata": safety_metadata_map.get(c.compound_code, {}),
+                })
 
             pdf_path = f"./reports/project_{project.id}_report.pdf"
             ReportGenerator.generate_pdf_report({
