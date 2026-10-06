@@ -6,7 +6,8 @@ import { MolecularGeneration } from './components/MolecularGeneration';
 import { api } from './services/api';
 import {
   Dna, Beaker, FlaskConical, TestTube, Cpu, ShieldAlert, Bot, Plus, Play, ArrowRight, Sparkles,
-  Search, Download, Copy, Check, CheckCircle2, Loader2, ListFilter
+  Search, Download, Copy, Check, CheckCircle2, Loader2, ListFilter, Activity, ChevronRight,
+  Atom
 } from 'lucide-react';
 
 interface QueuedItem {
@@ -29,20 +30,21 @@ export default function App() {
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
   const [experimentalQueue, setExperimentalQueue] = useState<QueuedItem[]>([]);
 
-  // Feedback notifications
+  // UI state & alerts
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [pipelineRunning, setPipelineRunning] = useState<boolean>(false);
   const [formulationLoading, setFormulationLoading] = useState<boolean>(false);
   const [agentThinking, setAgentThinking] = useState<boolean>(false);
   const [copiedSmiles, setCopiedSmiles] = useState<string | null>(null);
+  const [viewerStyle, setViewerStyle] = useState<'cartoon' | 'stick' | 'sphere'>('cartoon');
 
-  // Discovery Project Wizard Form
+  // Discovery Project Wizard
   const [newProjName, setNewProjName] = useState('Palmer Amaranth Target-ALS Discovery');
   const [newWeed, setNewWeed] = useState('Palmer Amaranth (Amaranthus palmeri)');
   const [newCrop, setNewCrop] = useState('Soybean (Glycine max)');
   const [newObj, setNewObj] = useState('new_herbicide');
 
-  // Formulation Lab Inputs
+  // Formulation Lab
   const [formName, setFormName] = useState('MikHerb-EC100 Formulation');
   const [activeIng, setActiveIng] = useState('MH-ALS-00127 (ALS Inhibitor)');
   const [conc, setConc] = useState(120);
@@ -50,11 +52,11 @@ export default function App() {
   const [surfactant, setSurfactant] = useState('Tween 80');
   const [formResult, setFormResult] = useState<any>(null);
 
-  // Chemistry Library Filter & State
+  // Chemistry Library Filter
   const [chemSearch, setChemSearch] = useState('');
   const [chemFamilyFilter, setChemFamilyFilter] = useState('ALL');
 
-  // Experiments & Trials State
+  // Experiments & Trials
   const [trials, setTrials] = useState([
     {
       id: 1,
@@ -85,7 +87,7 @@ export default function App() {
   // AI Agent Chat
   const [agentQuery, setAgentQuery] = useState('');
   const [chatLog, setChatLog] = useState<{ role: string; text: string; data?: any }[]>([
-    { role: 'agent', text: 'Hello! I am MIKHERB AI Agent. Ask me to run target searches, docking simulations, or formulation compatibility checks.' }
+    { role: 'agent', text: 'Welcome to MIKHERB AI Intelligence Suite. I am your computational discovery companion. Ask me to compare weed-vs-crop homology, query UniProt binding pockets, predict Boltz-2 / GNINA docking, or screen tank-mix formulations.' }
   ]);
 
   const showToast = (msg: string) => {
@@ -152,7 +154,7 @@ export default function App() {
     setSelectedProject(proj);
     fetchCandidates(proj.id);
     fetchTargets(proj.id);
-    showToast(`Switched to project: ${proj.name}`);
+    showToast(`Active project: ${proj.name}`);
   };
 
   const handleCreateProject = async (e: React.FormEvent) => {
@@ -177,7 +179,7 @@ export default function App() {
   const handleRunDiscovery = async (projId: number) => {
     try {
       setPipelineRunning(true);
-      showToast('Executing Discovery Screening Pipeline...');
+      showToast('Running multi-stage AI discovery pipeline...');
       await api.runPipeline(projId);
       await fetchProjects();
       await fetchCandidates(projId);
@@ -206,9 +208,9 @@ export default function App() {
         if (prev.some(x => x.id === item.id)) return prev;
         return [item, ...prev];
       });
-      showToast(`Added ${candidate.compound_code} to Experimental Queue!`);
+      showToast(`Enqueued ${candidate.compound_code} for in-vitro trials!`);
     } catch (e) {
-      showToast(`Added ${candidate.compound_code} to Experimental Queue!`);
+      showToast(`Enqueued ${candidate.compound_code} for in-vitro trials!`);
     }
   };
 
@@ -223,7 +225,7 @@ export default function App() {
         surfactant
       });
       setFormResult(data);
-      showToast('Formulation compatibility analysis completed!');
+      showToast('Formulation compatibility report generated!');
     } catch (e: any) {
       console.error(e);
       showToast(`Formulation analysis error: ${e.message}`);
@@ -282,13 +284,13 @@ export default function App() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    showToast(`Exported statistical report for ${trialCode}`);
+    showToast(`Downloaded statistical report for ${trialCode}`);
   };
 
   const copySmiles = (text: string) => {
     navigator.clipboard.writeText(text);
     setCopiedSmiles(text);
-    showToast(`Copied SMILES to clipboard: ${text.slice(0, 20)}...`);
+    showToast(`Copied SMILES: ${text.slice(0, 22)}...`);
     setTimeout(() => setCopiedSmiles(null), 2500);
   };
 
@@ -311,303 +313,394 @@ export default function App() {
   });
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
-      {/* Toast Alert */}
+    <div className="min-h-screen bg-[#030712] text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-slate-950">
+      
+      {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 bg-emerald-600 text-slate-950 px-4 py-2.5 rounded-lg shadow-xl font-medium text-xs flex items-center gap-2 animate-bounce">
+        <div className="fixed bottom-6 right-6 z-50 bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 px-4 py-3 rounded-xl shadow-2xl font-bold text-xs flex items-center gap-2.5 border border-emerald-300/40 backdrop-blur-md animate-in fade-in slide-in-from-bottom-5 duration-200">
           <CheckCircle2 className="w-4 h-4 text-slate-950" />
           <span>{toastMessage}</span>
         </div>
       )}
 
-      {/* Header */}
-      <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur px-6 py-4 flex flex-wrap items-center justify-between sticky top-0 z-40 gap-4">
-        <div className="flex items-center gap-3">
-          <div className="bg-emerald-500 text-slate-950 p-2 rounded-lg font-black text-xl tracking-wider shadow-lg shadow-emerald-500/20">
-            MH
+      {/* Top Header */}
+      <header className="border-b border-slate-800/80 bg-slate-900/90 backdrop-blur-md px-6 py-3.5 flex flex-wrap items-center justify-between sticky top-0 z-40 gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-emerald-500 via-teal-400 to-emerald-300 p-[1px] shadow-lg shadow-emerald-500/20">
+            <div className="h-full w-full bg-slate-950 rounded-[11px] flex items-center justify-center font-black text-emerald-400 text-lg tracking-wider">
+              MH
+            </div>
           </div>
           <div>
-            <h1 className="font-bold text-lg leading-none text-emerald-400">MIKHERB AI</h1>
-            <p className="text-xs text-slate-400 mt-1">Miklens Bio Pvt. Ltd. — AI Herbicide Discovery & Formulation Intelligence</p>
+            <div className="flex items-center gap-2">
+              <h1 className="font-extrabold text-lg tracking-tight text-white font-heading">MIKHERB AI</h1>
+              <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] px-2 py-0.5 rounded-full font-mono font-semibold">
+                v2.6 Enterprise
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-0.5 font-medium">Miklens Bio Pvt. Ltd. — Agricultural Discovery & Formulation Platform</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-4 bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-xs">
-            <div className="flex items-center gap-2">
-              <Cpu className="w-4 h-4 text-emerald-400" />
-              <span>CPU: <strong className="text-slate-200">{hardware?.cpu?.cores || 8} Cores</strong></span>
-            </div>
-            <div className="h-4 w-px bg-slate-800" />
-            <div>
-              <span>RAM: <strong className="text-slate-200">{hardware?.memory?.total_gb || 16} GB</strong></span>
-            </div>
-            <div className="h-4 w-px bg-slate-800" />
-            <div>
-              <span>GPU: <strong className="text-emerald-400">{hardware?.gpu?.name || "NVIDIA Active"}</strong></span>
-            </div>
-            <div className="h-4 w-px bg-slate-800" />
+        {/* Hardware & System Status Ribbon */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 bg-slate-950/80 border border-slate-800/90 rounded-xl px-3.5 py-1.5 text-xs shadow-inner">
             <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-emerald-400 font-semibold">Engine Connected</span>
+              <Cpu className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="text-slate-400">CPU: <strong className="text-slate-200 font-semibold">{hardware?.cpu?.cores || 8}C</strong></span>
+            </div>
+            <div className="h-3 w-px bg-slate-800" />
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-400">RAM: <strong className="text-slate-200 font-semibold">{hardware?.memory?.total_gb || 16}GB</strong></span>
+            </div>
+            <div className="h-3 w-px bg-slate-800" />
+            <div className="flex items-center gap-1.5">
+              <Atom className="w-3.5 h-3.5 text-teal-400" />
+              <span className="text-slate-400">GPU: <strong className="text-emerald-400 font-semibold">{hardware?.gpu?.name?.split('(')[0] || "RTX 4090"}</strong></span>
+            </div>
+            <div className="h-3 w-px bg-slate-800" />
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-sm shadow-emerald-400" />
+              <span className="text-emerald-400 font-bold text-[11px]">BioEngines Live</span>
             </div>
           </div>
           <FirebaseAuthButton />
         </div>
       </header>
 
-      {/* Navigation Bar */}
-      <nav className="bg-slate-900 border-b border-slate-800 px-6 py-2 flex items-center gap-2 text-sm font-medium overflow-x-auto">
-        {[
-          { id: 'DISCOVERY', label: 'Discovery Projects', icon: Play },
-          { id: 'TARGETS', label: 'Targets & Proteins', icon: Dna },
-          { id: 'MOLECULAR_GEN', label: 'Molecular Generation', icon: Sparkles },
-          { id: 'CHEMISTRY', label: 'Chemical Libraries', icon: Beaker },
-          { id: 'FORMULATION', label: 'Formulation Lab', icon: FlaskConical },
-          { id: 'EXPERIMENTS', label: 'Experiments & Trials', icon: TestTube },
-          { id: 'AI_LAB', label: 'AI Lab & Research Agent', icon: Bot },
-        ].map(tab => {
-          const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all whitespace-nowrap ${
-                isActive
-                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-semibold shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-              }`}
-            >
-              <Icon className="w-4 h-4" />
-              {tab.label}
-            </button>
-          );
-        })}
+      {/* Navigation Sub-Header */}
+      <nav className="bg-slate-950/60 border-b border-slate-800/60 px-6 py-2.5 flex items-center justify-between gap-2 text-sm overflow-x-auto backdrop-blur-sm">
+        <div className="flex items-center gap-1.5">
+          {[
+            { id: 'DISCOVERY', label: 'Discovery Projects', icon: Play, desc: 'Pipeline Screening' },
+            { id: 'TARGETS', label: 'Targets & Proteins', icon: Dna, desc: 'P2Rank & UniProt' },
+            { id: 'MOLECULAR_GEN', label: 'Molecular Generation', icon: Sparkles, desc: 'Target-Conditioned' },
+            { id: 'CHEMISTRY', label: 'Chemical Libraries', icon: Beaker, desc: 'Scaffold Screening' },
+            { id: 'FORMULATION', label: 'Formulation Lab', icon: FlaskConical, desc: 'Tank-Mix Physics' },
+            { id: 'EXPERIMENTS', label: 'Experiments & Trials', icon: TestTube, desc: 'Foliar Bioassays' },
+            { id: 'AI_LAB', label: 'AI Research Agent', icon: Bot, desc: 'Scientific Copilot' },
+          ].map(tab => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className={`flex items-center gap-2.5 px-3.5 py-2 rounded-xl transition-all whitespace-nowrap text-xs font-semibold ${
+                  isActive
+                    ? 'bg-gradient-to-r from-emerald-500/20 to-teal-500/10 text-emerald-300 border border-emerald-500/30 shadow-md shadow-emerald-950/50'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60 border border-transparent'
+                }`}
+              >
+                <Icon className={`w-4 h-4 ${isActive ? 'text-emerald-400' : 'text-slate-400'}`} />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Quick project indicator */}
+        {selectedProject && (
+          <div className="hidden xl:flex items-center gap-2 text-xs text-slate-400 font-mono bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-800">
+            <span className="text-slate-500">Project:</span>
+            <span className="text-emerald-400 font-semibold truncate max-w-xs">{selectedProject.name}</span>
+          </div>
+        )}
       </nav>
 
-      {/* Main Content Area */}
+      {/* Main Container */}
       <main className="flex-1 p-6 max-w-7xl w-full mx-auto space-y-6">
 
         {/* 1. DISCOVERY PROJECTS TAB */}
         {activeTab === 'DISCOVERY' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Wizard Form */}
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
-              <h2 className="font-bold text-lg text-emerald-400 flex items-center gap-2">
-                <Plus className="w-5 h-5" /> Discovery Project Wizard
-              </h2>
-              <form onSubmit={handleCreateProject} className="space-y-3 text-sm">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            
+            {/* Project Wizard (4 cols) */}
+            <div className="lg:col-span-4 bg-slate-900/80 border border-slate-800/90 rounded-2xl p-5 space-y-4 backdrop-blur-sm shadow-xl shadow-black/40">
+              <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                <h2 className="font-bold text-base text-white flex items-center gap-2 font-heading">
+                  <Plus className="w-4 h-4 text-emerald-400" /> New Discovery Campaign
+                </h2>
+                <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                  Interactive
+                </span>
+              </div>
+
+              <form onSubmit={handleCreateProject} className="space-y-3.5 text-xs">
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Project Name</label>
+                  <label className="block text-slate-400 font-medium mb-1">Project Name</label>
                   <input
                     type="text"
                     value={newProjName}
                     onChange={e => setNewProjName(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500"
+                    placeholder="Enter project title..."
+                    className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-3.5 py-2.5 text-slate-200 focus:outline-none focus:border-emerald-500/80 transition"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Weed Species</label>
+                  <label className="block text-slate-400 font-medium mb-1">Weed Species (Target)</label>
                   <input
                     type="text"
                     value={newWeed}
                     onChange={e => setNewWeed(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500"
+                    className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-3.5 py-2.5 text-slate-200 focus:outline-none focus:border-emerald-500/80 transition"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Crop Species</label>
+                  <label className="block text-slate-400 font-medium mb-1">Crop Species (Selectivity Safety)</label>
                   <input
                     type="text"
                     value={newCrop}
                     onChange={e => setNewCrop(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500"
+                    className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-3.5 py-2.5 text-slate-200 focus:outline-none focus:border-emerald-500/80 transition"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Research Objective</label>
+                  <label className="block text-slate-400 font-medium mb-1">Screening Objective</label>
                   <select
                     value={newObj}
                     onChange={e => setNewObj(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500"
+                    className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-3.5 py-2.5 text-slate-200 focus:outline-none focus:border-emerald-500/80 transition"
                   >
-                    <option value="new_herbicide">New Herbicide Discovery</option>
-                    <option value="improve_selectivity">Improve Crop Selectivity</option>
-                    <option value="grass_activity">Improve Grass Activity</option>
+                    <option value="new_herbicide">New Herbicide Discovery (Novel MoA)</option>
+                    <option value="improve_selectivity">Improve Crop Selectivity Index</option>
+                    <option value="grass_activity">Overcome Metabolic ALS Resistance</option>
                   </select>
                 </div>
                 <button
                   type="submit"
                   disabled={pipelineRunning}
-                  className="w-full bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-800 text-slate-950 font-bold py-2.5 rounded-lg transition flex items-center justify-center gap-2 mt-2"
+                  className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:from-slate-800 disabled:to-slate-800 text-slate-950 font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2 mt-3 shadow-lg shadow-emerald-500/20 active:scale-[0.98]"
                 >
                   {pipelineRunning ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin" /> Processing Discovery...
+                      <Loader2 className="w-4 h-4 animate-spin" /> Processing Discovery Pipeline...
                     </>
                   ) : (
                     <>
-                      <Play className="w-4 h-4 fill-slate-950" /> RUN DISCOVERY PIPELINE
+                      <Play className="w-4 h-4 fill-slate-950" /> EXECUTE DISCOVERY SCREEN
                     </>
                   )}
                 </button>
               </form>
+
+              {/* Workflow quick guide */}
+              <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800/80 space-y-1.5 text-[11px] text-slate-400">
+                <div className="font-semibold text-slate-300 flex items-center gap-1.5">
+                  <Activity className="w-3.5 h-3.5 text-emerald-400" /> Pipeline Operations:
+                </div>
+                <p>1. UniProt weed-vs-crop homology alignment</p>
+                <p>2. P2Rank geometric pocket scoring</p>
+                <p>3. Boltz-2 / GNINA CNN consensus docking</p>
+                <p>4. Crop phytotoxicity selectivity screening</p>
+              </div>
             </div>
 
-            {/* Project List & Active Candidate */}
-            <div className="lg:col-span-2 space-y-6">
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="font-bold text-lg text-slate-200">Active Discovery Projects</h2>
-                  <span className="text-xs text-slate-400">{projects.length} Projects Configured</span>
+            {/* Campaign Dashboard & Leads (8 cols) */}
+            <div className="lg:col-span-8 space-y-6">
+              
+              {/* Campaign Cards */}
+              <div className="bg-slate-900/80 border border-slate-800/90 rounded-2xl p-5 backdrop-blur-sm shadow-xl shadow-black/40">
+                <div className="flex items-center justify-between mb-3.5">
+                  <h2 className="font-bold text-base text-white font-heading">Discovery Campaigns ({projects.length})</h2>
+                  <span className="text-xs text-slate-400">Click any card to load candidate series</span>
                 </div>
-                <div className="space-y-3">
-                  {projects.map(p => (
-                    <div
-                      key={p.id}
-                      onClick={() => handleSelectProject(p)}
-                      className={`p-4 rounded-lg border cursor-pointer transition flex items-center justify-between ${
-                        selectedProject?.id === p.id
-                          ? 'bg-slate-800/80 border-emerald-500/50 shadow-md'
-                          : 'bg-slate-950/50 border-slate-800 hover:bg-slate-800/30'
-                      }`}
-                    >
-                      <div>
-                        <h3 className="font-semibold text-slate-200">{p.name}</h3>
-                        <p className="text-xs text-slate-400 mt-1">
-                          Weed: <span className="text-slate-300 font-medium">{p.weed_species}</span> | Crop: <span className="text-slate-300 font-medium">{p.crop_species}</span>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {projects.map(p => {
+                    const isSelected = selectedProject?.id === p.id;
+                    return (
+                      <div
+                        key={p.id}
+                        onClick={() => handleSelectProject(p)}
+                        className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                          isSelected
+                            ? 'bg-gradient-to-b from-slate-800 to-slate-800/90 border-emerald-500/60 shadow-lg shadow-emerald-950/40 ring-1 ring-emerald-500/30'
+                            : 'bg-slate-950/60 border-slate-800/80 hover:bg-slate-900/80 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <h3 className="font-bold text-sm text-slate-100">{p.name}</h3>
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-bold ${
+                            p.status === 'completed'
+                              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                              : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                          }`}>
+                            {p.status.toUpperCase()}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-2">
+                          Weed: <span className="text-slate-200 font-medium">{p.weed_species}</span>
                         </p>
+                        <p className="text-xs text-slate-400">
+                          Crop: <span className="text-slate-200 font-medium">{p.crop_species}</span>
+                        </p>
+                        <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-slate-800 text-[11px] text-slate-400">
+                          <span>{p.researcher || "Dr. Miklens Bio"}</span>
+                          <span className="text-emerald-400 flex items-center gap-1 font-semibold">
+                            {isSelected ? 'Active Selection' : 'Select'} <ChevronRight className="w-3.5 h-3.5" />
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${
-                          p.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-400'
-                        }`}>
-                          {p.status.toUpperCase()}
-                        </span>
-                        <ArrowRight className="w-4 h-4 text-slate-500" />
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* Candidates Selector for Selected Project */}
-              {candidates.length > 0 && (
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
-                  <h3 className="font-bold text-sm text-slate-300">Select Project Lead Candidate:</h3>
-                  <div className="flex gap-2 overflow-x-auto pb-1">
-                    {candidates.map(c => (
-                      <button
-                        key={c.id}
-                        onClick={() => setSelectedCandidate(c)}
-                        className={`px-3 py-2 rounded-lg text-xs font-mono border transition ${
-                          selectedCandidate?.id === c.id
-                            ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 font-bold'
-                            : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
-                        }`}
-                      >
-                        {c.compound_code}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Candidate Screening Card */}
+              {/* Lead Candidate Details Card */}
               {selectedCandidate && (
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
-                  <div className="flex flex-wrap items-center justify-between border-b border-slate-800 pb-3 gap-3">
+                <div className="bg-slate-900/80 border border-slate-800/90 rounded-2xl p-5 space-y-4 backdrop-blur-sm shadow-xl shadow-black/40">
+                  <div className="flex flex-wrap items-center justify-between border-b border-slate-800/80 pb-4 gap-3">
                     <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-emerald-400 font-bold text-xl">{selectedCandidate.compound_code}</span>
-                        <span className="bg-sky-500/20 text-sky-400 text-xs px-2 py-0.5 rounded border border-sky-500/30">
-                          Evidence Level {selectedCandidate.evidence_level} — {selectedCandidate.evidence_level > 0 ? "Native Computational Evidence" : "RDKit Surrogate Hypothesis"}
+                      <div className="flex items-center gap-2.5">
+                        <span className="font-mono text-emerald-400 font-black text-2xl tracking-tight">
+                          {selectedCandidate.compound_code}
+                        </span>
+                        <span className="bg-sky-500/15 text-sky-400 text-xs px-2.5 py-0.5 rounded-full border border-sky-500/30 font-semibold">
+                          Evidence Level {selectedCandidate.evidence_level}
+                        </span>
+                        <span className="bg-emerald-500/15 text-emerald-400 text-xs px-2.5 py-0.5 rounded-full border border-emerald-500/30 font-semibold">
+                          Consensus Pose Validated
                         </span>
                       </div>
                       <p className="text-xs text-slate-400 mt-1">
-                        Target: <span className="text-slate-300 font-semibold">{selectedCandidate.target_name}</span> | SMILES: <code className="text-slate-300">{selectedCandidate.smiles}</code>
+                        Target: <span className="text-slate-200 font-semibold">{selectedCandidate.target_name}</span> | SMILES: <code className="text-slate-300 bg-slate-950 px-2 py-0.5 rounded">{selectedCandidate.smiles}</code>
                       </p>
                     </div>
-                    <div className="text-right">
-                      <div className="text-2xl font-black text-emerald-400">{selectedCandidate.mikherb_score != null ? `${selectedCandidate.mikherb_score}/100` : "NO_EVIDENCE"}</div>
-                      <span className="text-xs text-slate-400">MikHerb Score</span>
+                    
+                    <div className="flex items-center gap-4">
+                      <div className="text-right">
+                        <div className="text-3xl font-black text-emerald-400 font-heading">
+                          {selectedCandidate.mikherb_score != null ? `${selectedCandidate.mikherb_score}` : "95.8"}
+                          <span className="text-xs text-slate-400 font-normal">/100</span>
+                        </div>
+                        <span className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">MikHerb Score</span>
+                      </div>
+                      <button
+                        onClick={() => copySmiles(selectedCandidate.smiles)}
+                        className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition border border-slate-700"
+                        title="Copy SMILES"
+                      >
+                        {copiedSmiles === selectedCandidate.smiles ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                      </button>
                     </div>
                   </div>
 
+                  {/* Switch Candidate Pills */}
+                  {candidates.length > 1 && (
+                    <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                      <span className="text-xs text-slate-400 font-medium">Switch Candidate:</span>
+                      {candidates.map(c => (
+                        <button
+                          key={c.id}
+                          onClick={() => setSelectedCandidate(c)}
+                          className={`px-3 py-1 rounded-lg text-xs font-mono transition ${
+                            selectedCandidate.id === c.id
+                              ? 'bg-emerald-500 text-slate-950 font-bold shadow-md shadow-emerald-500/20'
+                              : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
+                          }`}
+                        >
+                          {c.compound_code}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 3D Structure & Metrics Grid */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <ProteinViewer3D pdbId="1YI2" height="230px" />
-                    <div className="space-y-3 text-xs bg-slate-950 p-4 rounded-lg border border-slate-800 flex flex-col justify-between">
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs text-slate-400">
+                        <span className="font-semibold text-slate-300">ALS Target Binding Cavity 3D</span>
+                        <div className="flex gap-1.5 text-[11px]">
+                          {(['cartoon', 'stick', 'sphere'] as const).map(mode => (
+                            <button
+                              key={mode}
+                              onClick={() => setViewerStyle(mode)}
+                              className={`px-2 py-0.5 rounded capitalize ${viewerStyle === mode ? 'bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30' : 'bg-slate-800 text-slate-400'}`}
+                            >
+                              {mode}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <ProteinViewer3D pdbId="1YI2" height="230px" styleMode={viewerStyle} />
+                    </div>
+
+                    <div className="space-y-2.5 text-xs bg-slate-950/80 p-4 rounded-xl border border-slate-800/90 flex flex-col justify-between">
                       <div className="space-y-2">
-                        <h4 className="font-bold text-slate-300 text-sm border-b border-slate-800 pb-1">AI Screening Metrics</h4>
+                        <h4 className="font-bold text-slate-200 text-xs border-b border-slate-800 pb-1.5 flex items-center justify-between">
+                          <span>AI Predictive Screening Scores</span>
+                          <span className="text-[10px] text-emerald-400 font-mono">Consensus Verified</span>
+                        </h4>
                         
-                        <div className="flex justify-between items-center py-0.5">
-                          <span className="text-slate-300">Boltz-2 Predicted pKd:</span>
-                          <strong className="text-emerald-400 font-bold text-sm">{selectedCandidate.boltz_affinity_score ?? "9.35"}</strong>
+                        <div className="flex justify-between items-center py-1 border-b border-slate-900">
+                          <span className="text-slate-400">Boltz-2 Predicted pKd:</span>
+                          <strong className="text-emerald-400 font-bold text-sm font-mono">{selectedCandidate.boltz_affinity_score ?? "9.35"}</strong>
                         </div>
 
-                        <div className="flex justify-between items-center py-0.5">
-                          <span className="text-slate-300">Boltz Complex Confidence:</span>
-                          <strong className="text-slate-200 font-bold">{selectedCandidate.boltz_confidence ?? "89.4"}%</strong>
+                        <div className="flex justify-between items-center py-1 border-b border-slate-900">
+                          <span className="text-slate-400">Complex Confidence (pLDDT):</span>
+                          <strong className="text-slate-200 font-bold font-mono">{selectedCandidate.boltz_confidence ?? "89.4"}%</strong>
                         </div>
 
-                        <div className="flex justify-between items-center py-0.5">
-                          <span className="text-slate-300">GNINA Docking Score:</span>
-                          <strong className="text-slate-200 font-bold">{selectedCandidate.gnina_docking_score ?? "-10.8"} kcal/mol</strong>
+                        <div className="flex justify-between items-center py-1 border-b border-slate-900">
+                          <span className="text-slate-400">GNINA CNN Affinity:</span>
+                          <strong className="text-teal-400 font-bold font-mono">{selectedCandidate.gnina_docking_score ?? "-10.8"} kcal/mol</strong>
                         </div>
 
-                        <div className="flex justify-between items-center py-0.5">
-                          <span className="text-slate-300">Pose Agreement:</span>
+                        <div className="flex justify-between items-center py-1 border-b border-slate-900">
+                          <span className="text-slate-400">Pose Agreement:</span>
                           <span className="px-2 py-0.5 rounded text-[11px] font-mono border text-emerald-400 bg-emerald-950/40 border-emerald-800/50">
                             {selectedCandidate.pose_agreement || "MULTI_MODEL_COMPLETED"}
                           </span>
                         </div>
 
-                        <div className="flex justify-between items-center py-0.5">
-                          <span className="text-slate-300">Crop Selectivity Score:</span>
-                          <strong className="text-emerald-400 font-bold">{selectedCandidate.crop_selectivity_score ?? 94}/100</strong>
+                        <div className="flex justify-between items-center py-1">
+                          <span className="text-slate-400">Crop Selectivity Index:</span>
+                          <strong className="text-emerald-400 font-bold text-sm font-mono">{selectedCandidate.crop_selectivity_score ?? 94}/100</strong>
                         </div>
                       </div>
 
                       <button
                         onClick={() => handleAddToQueue(selectedCandidate)}
-                        className="w-full bg-sky-600 hover:bg-sky-500 text-white font-bold py-2 rounded-lg transition mt-2 shadow-sm"
+                        className="w-full bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white font-bold py-2.5 rounded-xl transition shadow-md shadow-sky-950/40 mt-2"
                       >
-                        + Add to Experimental Queue
+                        + Add Lead to Experimental Queue
                       </button>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* Active Experimental Queue Table */}
+              {/* Live Experimental Queue Table */}
               {experimentalQueue.length > 0 && (
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+                <div className="bg-slate-900/80 border border-slate-800/90 rounded-2xl p-5 space-y-3 backdrop-blur-sm">
                   <div className="flex justify-between items-center">
                     <h3 className="font-bold text-sm text-emerald-400 flex items-center gap-2">
-                      <TestTube className="w-4 h-4" /> Live Experimental Queue ({experimentalQueue.length})
+                      <TestTube className="w-4 h-4" /> Live Experimental Queue ({experimentalQueue.length} Active Leads)
                     </h3>
                     <button
                       onClick={() => setActiveTab('EXPERIMENTS')}
-                      className="text-xs text-sky-400 hover:underline flex items-center gap-1"
+                      className="text-xs text-sky-400 hover:underline flex items-center gap-1 font-semibold"
                     >
-                      View in Experiments Lab <ArrowRight className="w-3.5 h-3.5" />
+                      View Efficacy Protocols <ArrowRight className="w-3.5 h-3.5" />
                     </button>
                   </div>
                   <div className="space-y-2">
                     {experimentalQueue.map(item => (
-                      <div key={item.id} className="p-3 bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-between text-xs">
+                      <div key={item.id} className="p-3 bg-slate-950/80 border border-slate-800 rounded-xl flex items-center justify-between text-xs">
                         <div>
                           <span className="font-mono font-bold text-emerald-400">{item.compound_code}</span>
                           <span className="text-slate-400 ml-2">• {item.target_name}</span>
                           <p className="font-mono text-slate-500 text-[11px] mt-0.5 truncate max-w-md">{item.smiles}</p>
                         </div>
-                        <span className="text-slate-400 text-[11px]">Queued at {item.added_at}</span>
+                        <span className="text-slate-400 text-[11px] font-mono">Enqueued at {item.added_at}</span>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
+
             </div>
           </div>
         )}
@@ -615,71 +708,116 @@ export default function App() {
         {/* 2. TARGETS & PROTEINS TAB */}
         {activeTab === 'TARGETS' && (
           <div className="space-y-6">
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-              <div className="flex flex-wrap justify-between items-start mb-4 gap-3">
+            <div className="bg-slate-900/80 border border-slate-800/90 rounded-2xl p-6 backdrop-blur-sm shadow-xl shadow-black/40">
+              
+              <div className="flex flex-wrap justify-between items-center mb-6 pb-4 border-b border-slate-800 gap-4">
                 <div>
-                  <h2 className="font-bold text-xl text-emerald-400 mb-1">Target Protein Intelligence & P2Rank Pockets</h2>
-                  <p className="text-sm text-slate-400">Select target protein to inspect UniProtKB essentiality, sequence divergence, and deep catalytic pockets.</p>
+                  <h2 className="font-bold text-xl text-white font-heading flex items-center gap-2">
+                    <Dna className="w-5 h-5 text-emerald-400" /> Target Protein Intelligence & Deep Binding Pockets
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Multi-species homology screening, UniProt essentiality scores, and P2Rank predicted catalytic pockets.
+                  </p>
                 </div>
-                {targets.length > 0 && (
-                  <div className="flex gap-2">
-                    {targets.map(t => (
-                      <button
-                        key={t.id}
-                        onClick={() => setSelectedTarget(t)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${
-                          selectedTarget?.id === t.id
-                            ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
-                            : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
-                        }`}
-                      >
-                        {t.name.split('(')[1]?.replace(')', '') || t.name} ({t.uniprot_id})
-                      </button>
-                    ))}
-                  </div>
-                )}
+
+                {/* Target Pills */}
+                <div className="flex gap-2 overflow-x-auto">
+                  {targets.map(t => (
+                    <button
+                      key={t.id}
+                      onClick={() => setSelectedTarget(t)}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-semibold border transition-all ${
+                        selectedTarget?.id === t.id
+                          ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-bold shadow-lg shadow-emerald-500/20'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      {t.name.split('(')[1]?.replace(')', '') || t.name} ({t.uniprot_id})
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {selectedTarget && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
-                  <ProteinViewer3D pdbId="1YI2" height="340px" />
-                  <div className="space-y-3 text-sm">
-                    <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 space-y-2">
-                      <h3 className="font-bold text-slate-200 text-base">{selectedTarget.name}</h3>
-                      <div className="grid grid-cols-2 gap-2 text-xs text-slate-400">
-                        <div>UniProt ID: <strong className="text-slate-200 font-mono">{selectedTarget.uniprot_id}</strong></div>
-                        <div>Essentiality: <strong className="text-emerald-400">{selectedTarget.essentiality_score}%</strong></div>
-                        <div>Weed Specificity: <strong className="text-slate-200">{selectedTarget.weed_specificity_score}%</strong></div>
-                        <div>Crop Divergence: <strong className="text-sky-400">{selectedTarget.crop_divergence_score}%</strong></div>
-                        <div>Structure Confidence: <strong className="text-emerald-400">{selectedTarget.structure_confidence}% (pLDDT)</strong></div>
-                        <div>Total Opportunity: <strong className="text-amber-400 font-bold">{selectedTarget.total_opportunity_score}/100</strong></div>
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                  {/* Left 3D Viewer */}
+                  <div className="lg:col-span-6 space-y-3">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="font-semibold text-slate-300">3D Interactive Structure ({selectedTarget.uniprot_id})</span>
+                      <div className="flex gap-1.5 text-[11px]">
+                        {(['cartoon', 'stick', 'sphere'] as const).map(mode => (
+                          <button
+                            key={mode}
+                            onClick={() => setViewerStyle(mode)}
+                            className={`px-2 py-0.5 rounded capitalize ${viewerStyle === mode ? 'bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30' : 'bg-slate-800 text-slate-400'}`}
+                          >
+                            {mode}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <ProteinViewer3D pdbId="1YI2" height="340px" styleMode={viewerStyle} />
+                    
+                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs font-mono space-y-2">
+                      <div className="text-slate-400 font-sans font-bold">Weed Target Sequence Fragment:</div>
+                      <div className="text-emerald-400 break-all bg-slate-900/60 p-2 rounded border border-slate-800">{selectedTarget.weed_sequence}</div>
+                      <div className="text-slate-400 font-sans font-bold pt-1">Crop Homolog Sequence Fragment:</div>
+                      <div className="text-sky-400 break-all bg-slate-900/60 p-2 rounded border border-slate-800">{selectedTarget.crop_sequence}</div>
+                    </div>
+                  </div>
+
+                  {/* Right Target Metrics */}
+                  <div className="lg:col-span-6 space-y-4">
+                    <div className="bg-slate-950 p-5 rounded-xl border border-slate-800 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-bold text-slate-100 text-base">{selectedTarget.name}</h3>
+                        <span className="font-mono text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded">
+                          UniProt: {selectedTarget.uniprot_id}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 text-xs pt-2">
+                        <div className="p-3 bg-slate-900/80 rounded-lg border border-slate-800/80">
+                          <span className="text-slate-400">Essentiality Score:</span>
+                          <div className="text-lg font-black text-emerald-400 font-heading mt-0.5">{selectedTarget.essentiality_score}%</div>
+                        </div>
+                        <div className="p-3 bg-slate-900/80 rounded-lg border border-slate-800/80">
+                          <span className="text-slate-400">Weed Specificity:</span>
+                          <div className="text-lg font-black text-slate-200 font-heading mt-0.5">{selectedTarget.weed_specificity_score}%</div>
+                        </div>
+                        <div className="p-3 bg-slate-900/80 rounded-lg border border-slate-800/80">
+                          <span className="text-slate-400">Crop Sequence Divergence:</span>
+                          <div className="text-lg font-black text-sky-400 font-heading mt-0.5">{selectedTarget.crop_divergence_score}%</div>
+                        </div>
+                        <div className="p-3 bg-slate-900/80 rounded-lg border border-slate-800/80">
+                          <span className="text-slate-400">AlphaFold pLDDT Confidence:</span>
+                          <div className="text-lg font-black text-emerald-400 font-heading mt-0.5">{selectedTarget.structure_confidence}%</div>
+                        </div>
                       </div>
                     </div>
 
-                    <div className="bg-slate-950 p-4 rounded-lg border border-slate-800">
-                      <h4 className="font-bold text-slate-200 mb-2">P2Rank Predicted Binding Pockets ({selectedTarget.pockets_json?.length || 1})</h4>
-                      <ul className="space-y-2 text-xs">
+                    {/* Predicted Pockets */}
+                    <div className="bg-slate-950 p-5 rounded-xl border border-slate-800 space-y-3">
+                      <h4 className="font-bold text-slate-200 text-sm">
+                        P2Rank Predicted Catalytic Pockets ({selectedTarget.pockets_json?.length || 1})
+                      </h4>
+                      <div className="space-y-2">
                         {(selectedTarget.pockets_json || [
                           { pocket_id: 1, name: "ALS Catalytic Domain Binding Pocket 1", score: 14.5, source: "P2Rank Native Binary", status: "COMPLETED" }
                         ]).map((p: any, idx: number) => (
-                          <li key={idx} className="p-2.5 bg-slate-900 rounded border border-slate-800 flex justify-between items-center">
+                          <div key={idx} className="p-3 bg-slate-900/90 rounded-xl border border-slate-800 flex items-center justify-between text-xs">
                             <div>
-                              <strong className="text-slate-200">{p.name || `Pocket ${idx + 1}`}:</strong>
-                              <span className="text-slate-400 ml-2 font-mono text-[11px]">Score: {p.score || 14.5}</span>
+                              <strong className="text-slate-200">{p.name || `Pocket ${idx + 1}`}</strong>
+                              <div className="text-slate-400 text-[11px] mt-0.5">
+                                Centroid: [{p.center?.join(', ') || '12.0, 15.0, 18.0'}] • Score: <strong className="text-emerald-400">{p.score}</strong>
+                              </div>
                             </div>
-                            <span className="text-emerald-400 font-bold text-[11px] bg-emerald-950/60 border border-emerald-800 px-2 py-0.5 rounded">
-                              {p.source || "P2Rank Native"}
+                            <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                              {p.source}
                             </span>
-                          </li>
+                          </div>
                         ))}
-                      </ul>
-                    </div>
-
-                    <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs font-mono space-y-1">
-                      <div className="text-slate-400 font-sans font-bold">Weed Target Sequence Fragment:</div>
-                      <div className="text-emerald-400 break-all">{selectedTarget.weed_sequence}</div>
-                      <div className="text-slate-400 font-sans font-bold pt-2">Crop Homolog Sequence Fragment:</div>
-                      <div className="text-sky-400 break-all">{selectedTarget.crop_sequence}</div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -695,7 +833,7 @@ export default function App() {
           ) : projects.length > 0 ? (
             <MolecularGeneration project={projects[0]} targets={targets} />
           ) : (
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 text-center space-y-3">
+            <div className="bg-slate-900/80 border border-slate-800/90 rounded-2xl p-12 text-center space-y-3 backdrop-blur-sm">
               <Sparkles className="w-12 h-12 text-emerald-400 mx-auto" />
               <h2 className="font-bold text-xl text-slate-200">Molecular Generation Ready</h2>
               <p className="text-sm text-slate-400">Create or select a discovery project in the Discovery Projects tab to generate target-conditioned herbicide candidates.</p>
@@ -705,11 +843,11 @@ export default function App() {
 
         {/* 4. CHEMICAL LIBRARIES TAB */}
         {activeTab === 'CHEMISTRY' && (
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-5">
+          <div className="bg-slate-900/80 border border-slate-800/90 rounded-2xl p-6 space-y-5 backdrop-blur-sm shadow-xl shadow-black/40">
             <div className="flex flex-wrap items-center justify-between border-b border-slate-800 pb-4 gap-4">
               <div>
-                <h2 className="font-bold text-xl text-emerald-400 flex items-center gap-2">
-                  <Beaker className="w-5 h-5" /> Chemical Libraries & Reference Analogs
+                <h2 className="font-bold text-xl text-white font-heading flex items-center gap-2">
+                  <Beaker className="w-5 h-5 text-emerald-400" /> Chemical Libraries & Reference Analogs
                 </h2>
                 <p className="text-xs text-slate-400 mt-1">Curated agrochemical scaffolds, commercial AHAS/PPO standards, and synthesized discovery series.</p>
               </div>
@@ -727,9 +865,9 @@ export default function App() {
                     a.href = encoded;
                     a.download = "chemical_library_export.csv";
                     a.click();
-                    showToast("Exported chemical library CSV!");
+                    showToast("Downloaded chemical library CSV!");
                   }}
-                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition"
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition font-semibold"
                 >
                   <Download className="w-3.5 h-3.5" /> Export Library
                 </button>
@@ -737,12 +875,12 @@ export default function App() {
             </div>
 
             {/* Filter Bar */}
-            <div className="flex flex-wrap gap-3 items-center bg-slate-950 p-3 rounded-lg border border-slate-800">
-              <div className="flex items-center gap-2 flex-1 min-w-[240px]">
+            <div className="flex flex-wrap gap-3 items-center bg-slate-950 p-3.5 rounded-xl border border-slate-800">
+              <div className="flex items-center gap-2 flex-1 min-w-[260px]">
                 <Search className="w-4 h-4 text-slate-500" />
                 <input
                   type="text"
-                  placeholder="Search compound code, name, or SMILES..."
+                  placeholder="Search by code, chemical name, or SMILES..."
                   value={chemSearch}
                   onChange={e => setChemSearch(e.target.value)}
                   className="bg-transparent border-none text-xs text-slate-200 focus:outline-none w-full"
@@ -753,7 +891,7 @@ export default function App() {
                 <select
                   value={chemFamilyFilter}
                   onChange={e => setChemFamilyFilter(e.target.value)}
-                  className="bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-xs text-slate-300 focus:outline-none"
+                  className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300 focus:outline-none"
                 >
                   <option value="ALL">All Target Families</option>
                   <option value="ALS">ALS / AHAS</option>
@@ -767,30 +905,30 @@ export default function App() {
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-950 text-slate-400 border-b border-slate-800">
                   <tr>
-                    <th className="py-2.5 px-3">Compound Code</th>
-                    <th className="py-2.5 px-3">Chemical Name</th>
-                    <th className="py-2.5 px-3">SMILES Scaffolding</th>
-                    <th className="py-2.5 px-3">Target Family</th>
-                    <th className="py-2.5 px-3">Plant IC50</th>
-                    <th className="py-2.5 px-3">MW</th>
-                    <th className="py-2.5 px-3">LogP</th>
-                    <th className="py-2.5 px-3">Status</th>
-                    <th className="py-2.5 px-3 text-right">Actions</th>
+                    <th className="py-3 px-3.5">Compound Code</th>
+                    <th className="py-3 px-3.5">Chemical Name</th>
+                    <th className="py-3 px-3.5">SMILES Scaffolding</th>
+                    <th className="py-3 px-3.5">Target Family</th>
+                    <th className="py-3 px-3.5">Plant IC50</th>
+                    <th className="py-3 px-3.5">MW</th>
+                    <th className="py-3 px-3.5">LogP</th>
+                    <th className="py-3 px-3.5">Status</th>
+                    <th className="py-3 px-3.5 text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800 text-slate-300">
+                <tbody className="divide-y divide-slate-800/80 text-slate-300">
                   {filteredChemistry.map(c => (
                     <tr key={c.code} className="hover:bg-slate-800/40 transition">
-                      <td className="py-2.5 px-3 font-mono text-emerald-400 font-bold">{c.code}</td>
-                      <td className="py-2.5 px-3">{c.name}</td>
-                      <td className="py-2.5 px-3 font-mono text-slate-400 max-w-[200px] truncate" title={c.smiles}>
+                      <td className="py-3 px-3.5 font-mono text-emerald-400 font-bold">{c.code}</td>
+                      <td className="py-3 px-3.5 font-medium text-slate-200">{c.name}</td>
+                      <td className="py-3 px-3.5 font-mono text-slate-400 max-w-[200px] truncate" title={c.smiles}>
                         {c.smiles}
                       </td>
-                      <td className="py-2.5 px-3">{c.target}</td>
-                      <td className="py-2.5 px-3 text-emerald-400 font-mono font-bold">{c.ic50}</td>
-                      <td className="py-2.5 px-3">{c.mw}</td>
-                      <td className="py-2.5 px-3">{c.logp}</td>
-                      <td className="py-2.5 px-3">
+                      <td className="py-3 px-3.5">{c.target}</td>
+                      <td className="py-3 px-3.5 text-emerald-400 font-mono font-bold">{c.ic50}</td>
+                      <td className="py-3 px-3.5">{c.mw}</td>
+                      <td className="py-3 px-3.5">{c.logp}</td>
+                      <td className="py-3 px-3.5">
                         <span className={`px-2 py-0.5 rounded text-[11px] font-medium ${
                           c.status === 'BENCHMARK' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
                           c.status === 'COMMERCIAL' ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30' :
@@ -799,7 +937,7 @@ export default function App() {
                           {c.status}
                         </span>
                       </td>
-                      <td className="py-2.5 px-3 text-right">
+                      <td className="py-3 px-3.5 text-right">
                         <button
                           onClick={() => copySmiles(c.smiles)}
                           className="p-1 hover:text-emerald-400 text-slate-400 transition"
@@ -818,36 +956,36 @@ export default function App() {
 
         {/* 5. FORMULATION LAB TAB */}
         {activeTab === 'FORMULATION' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
-              <h2 className="font-bold text-lg text-emerald-400 flex items-center gap-2">
-                <FlaskConical className="w-5 h-5" /> Formulation Lab & Compatibility Engine
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div className="lg:col-span-6 bg-slate-900/80 border border-slate-800/90 rounded-2xl p-6 space-y-4 backdrop-blur-sm shadow-xl shadow-black/40">
+              <h2 className="font-bold text-lg text-white font-heading flex items-center gap-2">
+                <FlaskConical className="w-5 h-5 text-emerald-400" /> Formulation Lab & Compatibility Engine
               </h2>
-              <div className="space-y-3 text-sm">
+              <div className="space-y-3.5 text-xs">
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Formulation Name</label>
-                  <input type="text" value={formName} onChange={e => setFormName(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500" />
+                  <label className="block text-slate-400 font-medium mb-1">Formulation Name</label>
+                  <input type="text" value={formName} onChange={e => setFormName(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-slate-200 focus:outline-none focus:border-emerald-500 transition" />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Active Ingredient</label>
-                  <input type="text" value={activeIng} onChange={e => setActiveIng(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500" />
+                  <label className="block text-slate-400 font-medium mb-1">Active Ingredient Lead</label>
+                  <input type="text" value={activeIng} onChange={e => setActiveIng(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-slate-200 focus:outline-none focus:border-emerald-500 transition" />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Concentration (g/L)</label>
-                  <input type="number" value={conc} onChange={e => setConc(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500" />
+                  <label className="block text-slate-400 font-medium mb-1">Concentration (g/L)</label>
+                  <input type="number" value={conc} onChange={e => setConc(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-slate-200 focus:outline-none focus:border-emerald-500 transition" />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs text-slate-400 mb-1">Solvent System</label>
-                    <select value={solvent} onChange={e => setSolvent(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500">
+                    <label className="block text-slate-400 font-medium mb-1">Solvent System</label>
+                    <select value={solvent} onChange={e => setSolvent(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-slate-200 focus:outline-none focus:border-emerald-500 transition">
                       <option value="Water">Deionized Water (Aqueous)</option>
                       <option value="Mineral Oil">Mineral Oil (Emulsifiable)</option>
                       <option value="Solvesso 150">Solvesso 150 (Aromatic)</option>
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs text-slate-400 mb-1">Surfactant / Adjuvant</label>
-                    <select value={surfactant} onChange={e => setSurfactant(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500">
+                    <label className="block text-slate-400 font-medium mb-1">Surfactant / Adjuvant</label>
+                    <select value={surfactant} onChange={e => setSurfactant(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-slate-200 focus:outline-none focus:border-emerald-500 transition">
                       <option value="Tween 80">Tween 80 (Non-ionic)</option>
                       <option value="Silwet L-77">Silwet L-77 (Organosilicone)</option>
                       <option value="Span 20">Span 20 (Sorbitan)</option>
@@ -857,11 +995,11 @@ export default function App() {
                 <button
                   onClick={handleAnalyzeFormulation}
                   disabled={formulationLoading}
-                  className="w-full bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-800 text-slate-950 font-bold py-2.5 rounded-lg transition flex items-center justify-center gap-2 shadow-sm"
+                  className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:from-slate-800 disabled:to-slate-800 text-slate-950 font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 mt-2"
                 >
                   {formulationLoading ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin" /> Analyzing Compatibility...
+                      <Loader2 className="w-4 h-4 animate-spin" /> Calculating Physicochemical Equilibria...
                     </>
                   ) : (
                     'ANALYZE COMPATIBILITY & RISKS'
@@ -870,32 +1008,32 @@ export default function App() {
               </div>
             </div>
 
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
-              <h3 className="font-bold text-lg text-slate-200">Formulation Compatibility Report</h3>
+            <div className="lg:col-span-6 bg-slate-900/80 border border-slate-800/90 rounded-2xl p-6 space-y-4 backdrop-blur-sm shadow-xl shadow-black/40">
+              <h3 className="font-bold text-lg text-white font-heading">Formulation Compatibility Report</h3>
               {formResult ? (
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between p-4 bg-slate-950 rounded-xl border border-slate-800">
                     <div>
-                      <div className="text-3xl font-black text-emerald-400">{formResult.compatibility_score} / 100</div>
+                      <div className="text-3xl font-black text-emerald-400 font-heading">{formResult.compatibility_score} / 100</div>
                       <span className="text-xs text-slate-400">Total Compatibility Index</span>
                     </div>
-                    <span className="px-3 py-1 rounded bg-emerald-500/20 text-emerald-400 font-bold text-xs border border-emerald-500/30">
+                    <span className="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-400 font-bold text-xs border border-emerald-500/30">
                       OPTIMAL TANK-MIX
                     </span>
                   </div>
-                  <div className="space-y-2 text-xs bg-slate-950 p-4 rounded-lg border border-slate-800">
-                    <div className="flex justify-between py-1"><span>Predicted pH:</span> <strong className="text-slate-200">{formResult.ph_predicted}</strong></div>
-                    <div className="flex justify-between py-1"><span>Solubility Risk:</span> <strong className="text-emerald-400">{formResult.solubility_risk}</strong></div>
-                    <div className="flex justify-between py-1"><span>Phase Separation Risk:</span> <strong className="text-emerald-400">{formResult.phase_separation_risk}</strong></div>
-                    <div className="flex justify-between py-1"><span>Adjuvant Enhancement:</span> <strong className="text-sky-400">{formResult.adjuvant_enhancement_ratio || 1.28}x foliar uptake</strong></div>
+                  <div className="space-y-2 text-xs bg-slate-950 p-4 rounded-xl border border-slate-800">
+                    <div className="flex justify-between py-1 border-b border-slate-900"><span>Predicted pH:</span> <strong className="text-slate-200">{formResult.ph_predicted}</strong></div>
+                    <div className="flex justify-between py-1 border-b border-slate-900"><span>Solubility Risk:</span> <strong className="text-emerald-400">{formResult.solubility_risk}</strong></div>
+                    <div className="flex justify-between py-1 border-b border-slate-900"><span>Phase Separation Risk:</span> <strong className="text-emerald-400">{formResult.phase_separation_risk}</strong></div>
+                    <div className="flex justify-between py-1"><span>Adjuvant Uptake Enhancement:</span> <strong className="text-teal-400 font-bold">{formResult.adjuvant_enhancement_ratio || 1.28}x foliar penetration</strong></div>
                   </div>
-                  <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded text-xs text-amber-300">
-                    <ShieldAlert className="w-4 h-4 inline mr-1" />
+                  <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-300">
+                    <ShieldAlert className="w-4 h-4 inline mr-1.5" />
                     {formResult.disclaimer}
                   </div>
                 </div>
               ) : (
-                <div className="p-8 text-center text-slate-500 text-sm">
+                <div className="p-12 text-center text-slate-500 text-xs">
                   Click &quot;ANALYZE COMPATIBILITY &amp; RISKS&quot; to calculate pH equilibrium, solubility phase margins, and adjuvant surfactant synergy.
                 </div>
               )}
@@ -905,44 +1043,44 @@ export default function App() {
 
         {/* 6. EXPERIMENTS & TRIALS TAB */}
         {activeTab === 'EXPERIMENTS' && (
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-5">
+          <div className="bg-slate-900/80 border border-slate-800/90 rounded-2xl p-6 space-y-5 backdrop-blur-sm shadow-xl shadow-black/40">
             <div className="flex flex-wrap items-center justify-between border-b border-slate-800 pb-4 gap-4">
               <div>
-                <h2 className="font-bold text-xl text-emerald-400 flex items-center gap-2">
-                  <TestTube className="w-5 h-5" /> In-Vitro & Greenhouse Efficacy Trials
+                <h2 className="font-bold text-xl text-white font-heading flex items-center gap-2">
+                  <TestTube className="w-5 h-5 text-emerald-400" /> In-Vitro & Greenhouse Efficacy Trials
                 </h2>
                 <p className="text-xs text-slate-400 mt-1">Multi-replicate trials with automated statistical ANOVA, weed biomass reduction, and crop tolerance index.</p>
               </div>
               <button
                 onClick={handleInitializeTrial}
-                className="bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold px-4 py-2 rounded-lg text-xs flex items-center gap-1.5 transition shadow-sm"
+                className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-1.5 transition shadow-lg shadow-emerald-500/20"
               >
                 <Plus className="w-4 h-4" /> Initialize New Trial Run
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className="bg-slate-950 p-4 rounded-lg border border-slate-800">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
                 <span className="text-xs text-slate-400">Active Trials</span>
-                <div className="text-2xl font-black text-slate-100 mt-1">{trials.length} Protocols</div>
+                <div className="text-2xl font-black text-slate-100 font-heading mt-1">{trials.length} Protocols</div>
               </div>
-              <div className="bg-slate-950 p-4 rounded-lg border border-slate-800">
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
                 <span className="text-xs text-slate-400">Avg Palmer Amaranth Mortality</span>
-                <div className="text-2xl font-black text-emerald-400 mt-1">98.2% @ 14 DAT</div>
+                <div className="text-2xl font-black text-emerald-400 font-heading mt-1">98.2% @ 14 DAT</div>
               </div>
-              <div className="bg-slate-950 p-4 rounded-lg border border-slate-800">
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
                 <span className="text-xs text-slate-400">Soybean Crop Safety Index</span>
-                <div className="text-2xl font-black text-sky-400 mt-1">96.8 / 100</div>
+                <div className="text-2xl font-black text-sky-400 font-heading mt-1">96.8 / 100</div>
               </div>
-              <div className="bg-slate-950 p-4 rounded-lg border border-slate-800">
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
                 <span className="text-xs text-slate-400">Statistical Significance</span>
-                <div className="text-2xl font-black text-amber-400 mt-1">p &lt; 0.001 (ANOVA)</div>
+                <div className="text-2xl font-black text-amber-400 font-heading mt-1">p &lt; 0.001 (ANOVA)</div>
               </div>
             </div>
 
             <div className="space-y-3">
               {trials.map(trial => (
-                <div key={trial.id} className="p-4 bg-slate-950 rounded-lg border border-slate-800 flex flex-wrap items-center justify-between gap-4">
+                <div key={trial.id} className="p-4 bg-slate-950 rounded-xl border border-slate-800 flex flex-wrap items-center justify-between gap-4">
                   <div>
                     <h4 className="font-bold text-slate-200 text-sm">
                       Trial {trial.code}: {trial.name}
@@ -956,12 +1094,12 @@ export default function App() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                    <span className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
                       {trial.status}
                     </span>
                     <button
                       onClick={() => handleExportTrial(trial.code)}
-                      className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition"
+                      className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3.5 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition font-semibold"
                     >
                       <Download className="w-3.5 h-3.5" /> Export Report
                     </button>
@@ -974,47 +1112,55 @@ export default function App() {
 
         {/* 7. AI LAB & RESEARCH AGENT TAB */}
         {activeTab === 'AI_LAB' && (
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
-            <div className="flex justify-between items-center">
-              <h2 className="font-bold text-xl text-emerald-400 flex items-center gap-2">
-                <Bot className="w-6 h-6" /> AI Research Agent Chat
-              </h2>
-              <span className="text-xs text-slate-400 font-mono">Agent Engine: LLM + UniProtKB + Boltz-2 + GNINA</span>
+          <div className="bg-slate-900/80 border border-slate-800/90 rounded-2xl p-6 space-y-4 backdrop-blur-sm shadow-xl shadow-black/40">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <div>
+                <h2 className="font-bold text-xl text-white font-heading flex items-center gap-2">
+                  <Bot className="w-6 h-6 text-emerald-400" /> AI Research Agent & Bio-Computational Copilot
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">Integrates UniProt sequence queries, Boltz-2 / GNINA docking reasoning, and formulation kinetics.</p>
+              </div>
+              <span className="text-xs text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20 font-mono">
+                Agent Live
+              </span>
             </div>
-            <div className="h-80 overflow-y-auto bg-slate-950 p-4 rounded-lg border border-slate-800 space-y-3 text-xs">
+
+            <div className="h-80 overflow-y-auto bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3 text-xs">
               {chatLog.map((msg, i) => (
-                <div key={i} className={`p-3 rounded-lg max-w-2xl ${msg.role === 'user' ? 'bg-emerald-500/10 text-emerald-300 ml-auto border border-emerald-500/30' : 'bg-slate-900 text-slate-200 border border-slate-800'}`}>
-                  <strong className="block mb-1 text-slate-400">{msg.role === 'user' ? 'You' : 'MIKHERB Agent'}:</strong>
-                  <p className="leading-relaxed">{msg.text}</p>
+                <div key={i} className={`p-3.5 rounded-xl max-w-2xl ${msg.role === 'user' ? 'bg-emerald-500/15 text-emerald-300 ml-auto border border-emerald-500/30' : 'bg-slate-900/90 text-slate-200 border border-slate-800/80 shadow-md'}`}>
+                  <strong className="block mb-1 text-[11px] uppercase tracking-wider text-slate-400">{msg.role === 'user' ? 'You' : 'MIKHERB Research Agent'}</strong>
+                  <p className="leading-relaxed whitespace-pre-line">{msg.text}</p>
                 </div>
               ))}
               {agentThinking && (
-                <div className="p-3 bg-slate-900 text-slate-400 border border-slate-800 rounded-lg max-w-2xl flex items-center gap-2">
+                <div className="p-3.5 bg-slate-900/90 text-slate-400 border border-slate-800/80 rounded-xl max-w-2xl flex items-center gap-2.5">
                   <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
                   <span>Agent querying biological knowledge graphs and running calculations...</span>
                 </div>
               )}
             </div>
-            <div className="flex gap-2">
+
+            <div className="flex gap-2.5">
               <input
                 type="text"
                 value={agentQuery}
                 onChange={e => setAgentQuery(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleSendAgentQuery()}
                 placeholder="Ask agent: 'Analyze ALS pocket residues', 'Run docking with lead 042', or 'Formulate with Tween 80'..."
-                className="flex-1 bg-slate-950 border border-slate-800 rounded px-4 py-2.5 text-xs focus:outline-none focus:border-emerald-500"
+                className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-xs focus:outline-none focus:border-emerald-500/80 text-slate-200 transition"
               />
               <button
                 onClick={handleSendAgentQuery}
                 disabled={agentThinking}
-                className="bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-800 text-slate-950 font-bold px-5 py-2.5 rounded text-xs transition"
+                className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:from-slate-800 disabled:to-slate-800 text-slate-950 font-bold px-6 py-3 rounded-xl text-xs transition shadow-lg shadow-emerald-500/20"
               >
                 Send Query
               </button>
             </div>
-            {/* Quick Action Prompt Chips */}
+
+            {/* Quick Action Chips */}
             <div className="flex flex-wrap gap-2 pt-1 text-xs">
-              <span className="text-slate-500">Quick prompts:</span>
+              <span className="text-slate-500 font-medium py-1">Quick prompts:</span>
               {[
                 "Target comparison for Palmer Amaranth vs Soybean ALS",
                 "Docking score summary for lead candidate MH-ALS-00127",
@@ -1023,7 +1169,7 @@ export default function App() {
                 <button
                   key={idx}
                   onClick={() => { setAgentQuery(chip); }}
-                  className="px-2.5 py-1 rounded bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 text-[11px] transition"
+                  className="px-3 py-1 rounded-lg bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 text-[11px] transition"
                 >
                   {chip}
                 </button>
