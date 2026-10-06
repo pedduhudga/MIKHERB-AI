@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import type { Project, TargetProtein, MolecularGenerationRun, GeneratedMolecule } from '../types';
 import { api } from '../services/api';
-import { Sparkles, Play, CheckCircle2, AlertCircle, RefreshCw, Copy, Check } from 'lucide-react';
+import { Sparkles, Play, CheckCircle2, AlertCircle, RefreshCw, Copy, Check, FlaskConical } from 'lucide-react';
 
 interface Props {
   project: Project;
   targets: TargetProtein[];
+  onSendToFormulation?: (mol: GeneratedMolecule) => void;
 }
 
-export const MolecularGeneration: React.FC<Props> = ({ project, targets }) => {
+export const MolecularGeneration: React.FC<Props> = ({ project, targets, onSendToFormulation }) => {
   const [runs, setRuns] = useState<MolecularGenerationRun[]>([]);
   const [selectedRun, setSelectedRun] = useState<MolecularGenerationRun | null>(null);
   const [molecules, setMolecules] = useState<GeneratedMolecule[]>([]);
@@ -285,6 +286,7 @@ export const MolecularGeneration: React.FC<Props> = ({ project, targets }) => {
                   <th className="p-3 font-medium">Novelty Category</th>
                   <th className="p-3 font-medium">Alert Screen</th>
                   <th className="p-3 font-medium">Validation</th>
+                  <th className="p-3 font-medium text-right">Formulation Lab</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
@@ -362,6 +364,17 @@ export const MolecularGeneration: React.FC<Props> = ({ project, targets }) => {
                         <span className="px-2 py-0.5 rounded bg-red-950 text-red-300 text-[10px] font-medium" title={m.rejection_reason || ''}>
                           REJECTED
                         </span>
+                      )}
+                    </td>
+                    <td className="p-3 whitespace-nowrap text-right">
+                      {onSendToFormulation && (
+                        <button
+                          onClick={() => onSendToFormulation(m)}
+                          className="px-2 py-1 bg-emerald-600/80 hover:bg-emerald-500 text-slate-950 font-bold rounded text-[11px] flex items-center gap-1 ml-auto shadow-sm transition"
+                          title="Formulate this AI discovered molecule"
+                        >
+                          <FlaskConical className="w-3 h-3" /> Formulate AI Herbicide
+                        </button>
                       )}
                     </td>
                   </tr>
