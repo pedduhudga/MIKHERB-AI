@@ -838,7 +838,7 @@ export default function App() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <div className="flex items-center justify-between text-xs text-slate-400">
-                        <span className="font-semibold text-slate-300">ALS Target Binding Cavity 3D</span>
+                        <span className="font-semibold text-slate-300">Target Binding Cavity 3D</span>
                         <div className="flex gap-1.5 text-[11px]">
                           {(['cartoon', 'stick', 'sphere'] as const).map(mode => (
                             <button
@@ -851,7 +851,7 @@ export default function App() {
                           ))}
                         </div>
                       </div>
-                      <ProteinViewer3D pdbId="1YI2" height="230px" styleMode={viewerStyle} />
+                      <ProteinViewer3D uniprotId={selectedTarget?.uniprot_id || "A0A890DLI3"} height="230px" styleMode={viewerStyle} />
                     </div>
 
                     <div className="space-y-2.5 text-xs bg-slate-950/80 p-4 rounded-xl border border-slate-800/90 flex flex-col justify-between">
@@ -993,7 +993,7 @@ export default function App() {
                         ))}
                       </div>
                     </div>
-                    <ProteinViewer3D pdbId="1YI2" height="340px" styleMode={viewerStyle} />
+                    <ProteinViewer3D uniprotId={selectedTarget.uniprot_id} height="340px" styleMode={viewerStyle} />
                     
                     <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs font-mono space-y-2">
                       <div className="text-slate-400 font-sans font-bold">Weed Target Sequence Fragment:</div>

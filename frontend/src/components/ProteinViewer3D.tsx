@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 
 interface ViewerProps {
+  uniprotId?: string;
   pdbId?: string;
   height?: string;
   styleMode?: 'cartoon' | 'stick' | 'sphere';
 }
 
-// Fallback minimal PDB backbone in case external RCSB network fetch is restricted or offline
+// Fallback minimal PDB backbone in case external structure fetch is restricted or offline
 const MINIMAL_PDB = `HEADER    PROTEIN                                 06-OCT-26   1YI2              
 ATOM      1  N   ALA A   1      20.154  11.234  15.670  1.00 20.00           N  
 ATOM      2  CA  ALA A   1      21.234  12.100  16.120  1.00 20.00           C  
@@ -34,13 +35,19 @@ TER      23      TYR A   5
 END                                                                             
 `;
 
-export const ProteinViewer3D: React.FC<ViewerProps> = ({ pdbId = "1YI2", height = "350px", styleMode = "cartoon" }) => {
+export const ProteinViewer3D: React.FC<ViewerProps> = ({
+  uniprotId,
+  pdbId,
+  height = "350px",
+  styleMode = "cartoon"
+}) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
-  const [source, setSource] = useState<string>("RCSB PDB");
+  const [source, setSource] = useState<string>("Structure Model");
 
   useEffect(() => {
     let isMounted = true;
+
     if (containerRef.current && (window as any).$3Dmol) {
       const element = containerRef.current;
       element.innerHTML = "";
@@ -65,23 +72,55 @@ export const ProteinViewer3D: React.FC<ViewerProps> = ({ pdbId = "1YI2", height 
       };
 
       setLoading(true);
-      fetch(`https://files.rcsb.org/download/${pdbId}.pdb`, { signal: AbortSignal.timeout(3500) })
-        .then(res => {
-          if (!res.ok) throw new Error("RCSB fetch status: " + res.status);
-          return res.text();
-        })
-        .then(data => {
-          renderData(data, `RCSB PDB: ${pdbId}`);
-        })
-        .catch(() => {
-          renderData(MINIMAL_PDB, `AlphaFold Synthetic Cache (${pdbId})`);
-        });
+
+      const cleanUniprot = uniprotId ? uniprotId.trim().toUpperCase() : undefined;
+
+      if (cleanUniprot) {
+        // First try AlphaFold EBI API/file fetch
+        const afUrl = `https://alphafold.ebi.ac.uk/files/AF-${cleanUniprot}-F1-model_v4.pdb`;
+        fetch(afUrl, { signal: AbortSignal.timeout(4000) })
+          .then(res => {
+            if (!res.ok) throw new Error(`AlphaFold fetch status: ${res.status}`);
+            return res.text();
+          })
+          .then(data => {
+            if (data.includes("ATOM")) {
+              renderData(data, `AlphaFold DB: AF-${cleanUniprot}-F1`);
+            } else {
+              throw new Error("Invalid PDB payload");
+            }
+          })
+          .catch(() => {
+            // Fallback to RCSB PDB if pdbId supplied, or fallback minimal structure
+            if (pdbId) {
+              fetch(`https://files.rcsb.org/download/${pdbId}.pdb`, { signal: AbortSignal.timeout(3500) })
+                .then(res => {
+                  if (!res.ok) throw new Error("RCSB fetch status: " + res.status);
+                  return res.text();
+                })
+                .then(data => renderData(data, `RCSB PDB: ${pdbId}`))
+                .catch(() => renderData(MINIMAL_PDB, `AlphaFold Model (${cleanUniprot})`));
+            } else {
+              renderData(MINIMAL_PDB, `AlphaFold Model (${cleanUniprot})`);
+            }
+          });
+      } else if (pdbId) {
+        fetch(`https://files.rcsb.org/download/${pdbId}.pdb`, { signal: AbortSignal.timeout(3500) })
+          .then(res => {
+            if (!res.ok) throw new Error("RCSB fetch status: " + res.status);
+            return res.text();
+          })
+          .then(data => renderData(data, `RCSB PDB: ${pdbId}`))
+          .catch(() => renderData(MINIMAL_PDB, `Structure Cache (${pdbId})`));
+      } else {
+        renderData(MINIMAL_PDB, "Default Reference Structure");
+      }
     }
 
     return () => {
       isMounted = false;
     };
-  }, [pdbId, styleMode]);
+  }, [uniprotId, pdbId, styleMode]);
 
   return (
     <div className="relative rounded-lg overflow-hidden border border-slate-800 bg-slate-950">
