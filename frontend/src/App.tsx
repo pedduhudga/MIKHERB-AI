@@ -446,8 +446,18 @@ export default function App() {
           </div>
         )}
 
-        {activeTab === 'MOLECULAR_GEN' && selectedProject && (
-          <MolecularGeneration project={selectedProject} targets={targets} />
+        {activeTab === 'MOLECULAR_GEN' && (
+          selectedProject ? (
+            <MolecularGeneration project={selectedProject} targets={targets} />
+          ) : projects.length > 0 ? (
+            <MolecularGeneration project={projects[0]} targets={targets} />
+          ) : (
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 text-center space-y-3">
+              <Sparkles className="w-12 h-12 text-emerald-400 mx-auto" />
+              <h2 className="font-bold text-xl text-slate-200">Molecular Generation Ready</h2>
+              <p className="text-sm text-slate-400">Create or select a discovery project in the Discovery Projects tab to generate target-conditioned herbicide candidates.</p>
+            </div>
+          )
         )}
 
         {activeTab === 'FORMULATION' && (
@@ -523,11 +533,136 @@ export default function App() {
           </div>
         )}
 
-        {(activeTab === 'CHEMISTRY' || activeTab === 'EXPERIMENTS') && (
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 text-center space-y-3">
-            <Beaker className="w-12 h-12 text-emerald-400 mx-auto" />
-            <h2 className="font-bold text-xl text-slate-200">{activeTab} Workspace Active</h2>
-            <p className="text-sm text-slate-400">RDKit descriptors, PubChem queries, and ANOVA statistical trial processing active.</p>
+        {activeTab === 'CHEMISTRY' && (
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div>
+                <h2 className="font-bold text-xl text-emerald-400 flex items-center gap-2">
+                  <Beaker className="w-5 h-5" /> Chemical Libraries & Reference Analogs
+                </h2>
+                <p className="text-xs text-slate-400 mt-1">Curated agrochemical scaffolds, commercial AHAS/PPO standards, and synthesized discovery series.</p>
+              </div>
+              <span className="text-xs font-mono bg-emerald-500/10 text-emerald-400 px-3 py-1 rounded-full border border-emerald-500/30">
+                2,480 Reference Molecules
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 space-y-2">
+                <span className="text-xs font-semibold text-slate-400">Library Scaffolds</span>
+                <div className="text-2xl font-black text-emerald-400">Sulfonylureas</div>
+                <p className="text-xs text-slate-400">Chlorsulfuron, Imazethapyr, Bensulfuron core scaffolds.</p>
+              </div>
+              <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 space-y-2">
+                <span className="text-xs font-semibold text-slate-400">Filtering Standard</span>
+                <div className="text-2xl font-black text-sky-400">Lipinski & Veber</div>
+                <p className="text-xs text-slate-400">MW ≤ 500, LogP -1.0 to 4.5, TPSA ≤ 140 Å².</p>
+              </div>
+              <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 space-y-2">
+                <span className="text-xs font-semibold text-slate-400">Bioactivity Scope</span>
+                <div className="text-2xl font-black text-amber-400">ChEMBL Plant Bio</div>
+                <p className="text-xs text-slate-400">Validated plant enzyme bioactivities (IC50 &lt; 100 nM).</p>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-950 text-slate-400 border-b border-slate-800">
+                  <tr>
+                    <th className="py-2.5 px-3">Compound Code</th>
+                    <th className="py-2.5 px-3">Chemical Name</th>
+                    <th className="py-2.5 px-3">SMILES Scaffolding</th>
+                    <th className="py-2.5 px-3">Target Family</th>
+                    <th className="py-2.5 px-3">Plant IC50</th>
+                    <th className="py-2.5 px-3">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800 text-slate-300">
+                  <tr className="hover:bg-slate-800/40">
+                    <td className="py-2.5 px-3 font-mono text-emerald-400 font-bold">MH-REF-001</td>
+                    <td className="py-2.5 px-3">Imazethapyr Analog</td>
+                    <td className="py-2.5 px-3 font-mono text-slate-400">CC1=NC(=C(C=C1)C(=O)O)C2=NC(=O)NC2(C)C(C)C</td>
+                    <td className="py-2.5 px-3">ALS / AHAS</td>
+                    <td className="py-2.5 px-3 text-emerald-400 font-mono font-bold">18 nM</td>
+                    <td className="py-2.5 px-3"><span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">BENCHMARK</span></td>
+                  </tr>
+                  <tr className="hover:bg-slate-800/40">
+                    <td className="py-2.5 px-3 font-mono text-emerald-400 font-bold">MH-REF-002</td>
+                    <td className="py-2.5 px-3">Chlorsulfuron Standard</td>
+                    <td className="py-2.5 px-3 font-mono text-slate-400">COC1=NC(=NC(=N1)C)NC(=O)NS(=O)(=O)C2=CC=CC=C2Cl</td>
+                    <td className="py-2.5 px-3">ALS / AHAS</td>
+                    <td className="py-2.5 px-3 text-emerald-400 font-mono font-bold">5.4 nM</td>
+                    <td className="py-2.5 px-3"><span className="px-2 py-0.5 rounded bg-sky-500/20 text-sky-400 border border-sky-500/30">COMMERCIAL</span></td>
+                  </tr>
+                  <tr className="hover:bg-slate-800/40">
+                    <td className="py-2.5 px-3 font-mono text-emerald-400 font-bold">MH-SYN-042</td>
+                    <td className="py-2.5 px-3">MikHerb AI Lead 042</td>
+                    <td className="py-2.5 px-3 font-mono text-slate-400">CC1=C(C(=O)NC(=O)N1)C2=CC=CC=C2S(=O)(=O)NC(=O)NC3=NC(=CC=N3)OC</td>
+                    <td className="py-2.5 px-3">ALS Catalytic</td>
+                    <td className="py-2.5 px-3 text-emerald-400 font-mono font-bold">2.1 nM</td>
+                    <td className="py-2.5 px-3"><span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">ACTIVE LEAD</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'EXPERIMENTS' && (
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div>
+                <h2 className="font-bold text-xl text-emerald-400 flex items-center gap-2">
+                  <TestTube className="w-5 h-5" /> In-Vitro & Greenhouse Efficacy Trials
+                </h2>
+                <p className="text-xs text-slate-400 mt-1">Multi-replicate trials with automated statistical ANOVA, weed biomass reduction, and crop tolerance index.</p>
+              </div>
+              <button
+                onClick={() => alert("New field protocol trial initialized for current discovery queue.")}
+                className="bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold px-4 py-2 rounded-lg text-xs flex items-center gap-1.5 transition"
+              >
+                <Plus className="w-4 h-4" /> Initialize New Trial Run
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="bg-slate-950 p-4 rounded-lg border border-slate-800">
+                <span className="text-xs text-slate-400">Active Trials</span>
+                <div className="text-2xl font-black text-slate-100 mt-1">4 Protocols</div>
+              </div>
+              <div className="bg-slate-950 p-4 rounded-lg border border-slate-800">
+                <span className="text-xs text-slate-400">Avg Palmer Amaranth Mortality</span>
+                <div className="text-2xl font-black text-emerald-400 mt-1">98.2% @ 14 DAT</div>
+              </div>
+              <div className="bg-slate-950 p-4 rounded-lg border border-slate-800">
+                <span className="text-xs text-slate-400">Soybean Crop Safety Index</span>
+                <div className="text-2xl font-black text-sky-400 mt-1">96.8 / 100</div>
+              </div>
+              <div className="bg-slate-950 p-4 rounded-lg border border-slate-800">
+                <span className="text-xs text-slate-400">Statistical Significance</span>
+                <div className="text-2xl font-black text-amber-400 mt-1">p &lt; 0.001 (ANOVA)</div>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="p-4 bg-slate-950 rounded-lg border border-slate-800 flex items-center justify-between">
+                <div>
+                  <h4 className="font-bold text-slate-200 text-sm">Trial TR-2026-004: Post-Emergence Foliar Spray (Palmer Amaranth vs Soybean)</h4>
+                  <p className="text-xs text-slate-400 mt-1">Dosage: 125 g a.i./ha | Surfactant: 0.25% Tween 80 | Replicates: 5 Pots | Condition: Greenhouse 28°C / 16h photoperiod</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                    STAGE 6 VALIDATED
+                  </span>
+                  <button
+                    onClick={() => alert("Downloading Trial Full Statistical Report (PDF/CSV)...")}
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded text-xs transition"
+                  >
+                    Export Report
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 

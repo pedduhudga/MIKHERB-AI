@@ -78,16 +78,20 @@ def verify_firebase_token(id_token: str) -> Optional[Dict[str, Any]]:
 
 def is_auth_required() -> bool:
     """
-    Production-default security: Require Firebase Authentication by default.
-    Only allows unauthenticated dev mode when REQUIRE_FIREBASE_AUTH is explicitly 'false' / '0',
-    or during automated test execution (PYTEST_CURRENT_TEST).
+    Require Firebase Authentication when:
+    - REQUIRE_FIREBASE_AUTH is explicitly set to 'true' / '1', OR
+    - Firebase Admin SDK is initialized with valid credentials (_firebase_initialized is True)
+      AND REQUIRE_FIREBASE_AUTH is not explicitly disabled ('false' / '0').
+    In local development or public preview mode without Firebase credentials,
+    unauthenticated access falls back to a default local researcher context.
     """
     env_val = os.getenv("REQUIRE_FIREBASE_AUTH")
     if env_val is not None:
         return env_val.lower() in ("true", "1", "yes")
     if "PYTEST_CURRENT_TEST" in os.environ:
         return False
-    return True
+    # If Firebase Admin is initialized with valid credentials, require auth by default
+    return _firebase_initialized
 
 def verify_project_ownership(project: Any, current_user: Optional[Dict[str, Any]]) -> None:
     """
