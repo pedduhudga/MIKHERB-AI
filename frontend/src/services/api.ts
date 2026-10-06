@@ -317,31 +317,29 @@ export const api = {
     } catch (e) {
       console.warn("Backend molecules endpoint unreachable, providing generated candidate pool:", e);
     }
-    return fallbackCandidates.map(c => ({
-      id: c.id,
+    return fallbackCandidates.map((c, idx) => ({
+      id: c.id || (idx + 1),
       project_id: projectId,
       run_id: runId || 1,
       target_id: 101,
       compound_code: c.compound_code,
       smiles: c.smiles,
       canonical_smiles: c.smiles,
+      generation_mode: "RDKit_ENUMERATION",
       inchikey: "VNWKTOKETHGBQD-UHFFFAOYSA-N",
-      molecular_weight: 399.4,
-      logp: 1.25,
-      hbd_count: 2,
-      hba_count: 6,
-      rotatable_bond_count: 4,
+      mw: idx === 0 ? 399.4 : idx === 1 ? 414.3 : 382.2,
+      logp: idx === 0 ? 1.25 : idx === 1 ? 2.10 : 0.85,
+      hbd: 2,
+      hba: 6,
+      rotatable_bonds: 4,
       tpsa: 112.5,
-      is_valid: true,
+      chemical_validation_status: "VALID",
+      pocket_fit_score: idx === 0 ? 0.88 : idx === 1 ? 0.76 : 0.69,
+      novelty_category: idx === 0 ? "POTENTIALLY_NOVEL" : "MODERATE_SIMILARITY",
+      structural_alerts_count: 0,
       filter_status: "PASSED",
-      novelty_category: "POTENTIALLY_NOVEL",
       closest_known_similarity: 0.64,
       novelty_scope_status: "MULTI_DB_VERIFIED",
-      pocket_complementarity: {
-        pocket_fit_score: 0.88,
-        shape_complementarity: 0.82,
-        evaluation_type: "POCKET_DERIVED_HEURISTIC"
-      },
       created_at: new Date().toISOString()
     }));
   },
