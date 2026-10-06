@@ -160,7 +160,12 @@ class DatabaseRetrievalGenerator(BaseMolecularGenerator):
 
                         # Must match target organism if specified; do not adopt generic non-plant targets solely on gene symbol substring
                         if target_organism:
-                            org_match = (target_organism.lower() in t_org) or (t_org in target_organism.lower())
+                            tgt_norm = target_organism.strip().lower()
+                            t_org_norm = t_org.strip().lower()
+                            # Exact match or canonical genus-species word matching (avoiding ambiguous partial substring overlaps)
+                            words_tgt = set(tgt_norm.split())
+                            words_org = set(t_org_norm.split())
+                            org_match = (tgt_norm == t_org_norm) or (len(words_tgt) >= 2 and words_tgt.issubset(words_org))
                             if org_match and t_type in ["SINGLE PROTEIN", "PROTEIN COMPLEX"]:
                                 target_chembl_id = tgt.get("target_chembl_id")
                                 break

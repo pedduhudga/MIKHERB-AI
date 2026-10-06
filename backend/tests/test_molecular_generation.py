@@ -345,6 +345,19 @@ def test_molecular_generation_manager_strict_7_stage_target_validation_gate():
     assert res_s2_false["status"] == GenerationRunStatus.FAILED.value
     assert "TARGET_IDENTITY_VERIFIED" in res_s2_false["error"]
 
+    # Stage 2 Regression Test: Provenance-only identity must FAIL (no provenance-only identity bypass)
+    res_s2_prov_only = manager.execute_generation_run(
+        target_info={
+            "id": 1, "target_id": 1, "gene": "ALS", "target_family": "ALS",
+            "weed_species": "Amaranthus palmeri", "sequence": "MVKLAARSTPGRSVVTALKP",
+            "provenance": {"provenance_status": "VERIFIED"}
+            # target_identity_verified omitted
+        },
+        generation_mode=GenerationMode.RDKit_ENUMERATION
+    )
+    assert res_s2_prov_only["status"] == GenerationRunStatus.FAILED.value
+    assert "TARGET_IDENTITY_VERIFIED" in res_s2_prov_only["error"]
+
     # 4. Stage 3: Unverified gene (both None and False must be rejected)
     res_s3_none = manager.execute_generation_run(
         target_info={
@@ -437,7 +450,7 @@ def test_molecular_generation_manager_strict_7_stage_target_validation_gate():
             "gene_verified": True, "function_verified": True, "essentiality_evidence": "Essential",
             "weed_species": "Amaranthus palmeri", "organism_verified": True,
             "sequence": "MVKLA",  # Only 5 amino acids, rejected
-            "pockets_json": [{"center": [1.0, 2.0, 3.0]}]
+            "pockets_json": [{"center": [1.0, 2.0, 3.0], "source": "P2Rank Native Binary", "score": 0.8, "status": "COMPLETED"}]
         },
         generation_mode=GenerationMode.RDKit_ENUMERATION
     )
@@ -464,7 +477,7 @@ def test_molecular_generation_manager_strict_7_stage_target_validation_gate():
             "weed_species": "Amaranthus palmeri", "organism_verified": True,
             "sequence": "MVKLAARSTPGRSVVTALKPALSD",
             "pocket_prediction_status": "FAILED_EXECUTION",
-            "pockets_json": [{"center": [1.0, 2.0, 3.0], "status": "FAILED_EXECUTION"}]
+            "pockets_json": [{"center": [1.0, 2.0, 3.0], "source": "P2Rank Native Binary", "score": 0.8, "status": "FAILED_EXECUTION"}]
         },
         generation_mode=GenerationMode.RDKit_ENUMERATION
     )
@@ -478,14 +491,60 @@ def test_molecular_generation_manager_strict_7_stage_target_validation_gate():
             "weed_species": "Amaranthus palmeri", "organism_verified": True,
             "sequence": "MVKLAARSTPGRSVVTALKPALSD",
             "structure_status": "HEURISTIC_ONLY",
-            "pockets_json": [{"center": [1.0, 2.0, 3.0], "status": "COMPLETED"}]
+            "pockets_json": [{"center": [1.0, 2.0, 3.0], "source": "P2Rank Native Binary", "score": 0.8, "status": "COMPLETED"}]
         },
         generation_mode=GenerationMode.RDKit_ENUMERATION
     )
     assert res_s7_heuristic["status"] == GenerationRunStatus.FAILED.value
     assert "STRUCTURE_POCKET_VALIDATED" in res_s7_heuristic["error"]
 
-    # 9. Complete valid target satisfies all 7 prerequisite gates
+    # Explicit Regression Test 2: Missing P2Rank source must FAIL
+    res_s7_no_source = manager.execute_generation_run(
+        target_info={
+            "id": 1, "gene": "ALS", "target_family": "ALS", "target_identity_verified": True,
+            "gene_verified": True, "function_verified": True, "essentiality_evidence": "Essential",
+            "weed_species": "Amaranthus palmeri", "organism_verified": True,
+            "sequence": "MVKLAARSTPGRSVVTALKPALSD",
+            "pocket_prediction_status": "COMPLETED",
+            "pockets_json": [{"center": [1.0, 2.0, 3.0], "score": 0.8, "status": "COMPLETED"}]
+        },
+        generation_mode=GenerationMode.RDKit_ENUMERATION
+    )
+    assert res_s7_no_source["status"] == GenerationRunStatus.FAILED.value
+    assert "STRUCTURE_POCKET_VALIDATED" in res_s7_no_source["error"]
+    assert "P2Rank Native Binary" in res_s7_no_source["error"]
+
+    # Explicit Regression Test 3: Missing P2Rank score must FAIL
+    res_s7_no_score = manager.execute_generation_run(
+        target_info={
+            "id": 1, "gene": "ALS", "target_family": "ALS", "target_identity_verified": True,
+            "gene_verified": True, "function_verified": True, "essentiality_evidence": "Essential",
+            "weed_species": "Amaranthus palmeri", "organism_verified": True,
+            "sequence": "MVKLAARSTPGRSVVTALKPALSD",
+            "pocket_prediction_status": "COMPLETED",
+            "pockets_json": [{"center": [1.0, 2.0, 3.0], "source": "P2Rank Native Binary", "status": "COMPLETED"}]
+        },
+        generation_mode=GenerationMode.RDKit_ENUMERATION
+    )
+    assert res_s7_no_score["status"] == GenerationRunStatus.FAILED.value
+    assert "STRUCTURE_POCKET_VALIDATED" in res_s7_no_score["error"]
+    assert "pocket score" in res_s7_no_score["error"].lower()
+
+    # Explicit Regression Test 4: Fake completed pocket (center + completed status alone) must FAIL
+    res_s7_fake = manager.execute_generation_run(
+        target_info={
+            "id": 1, "gene": "ALS", "target_family": "ALS", "target_identity_verified": True,
+            "gene_verified": True, "function_verified": True, "essentiality_evidence": "Essential",
+            "weed_species": "Amaranthus palmeri", "organism_verified": True,
+            "sequence": "MVKLAARSTPGRSVVTALKPALSD",
+            "pockets_json": [{"center": [12.0, 15.0, 18.0], "status": "COMPLETED"}]
+        },
+        generation_mode=GenerationMode.RDKit_ENUMERATION
+    )
+    assert res_s7_fake["status"] == GenerationRunStatus.FAILED.value
+    assert "STRUCTURE_POCKET_VALIDATED" in res_s7_fake["error"]
+
+    # 9. Complete valid target satisfies all 7 prerequisite gates including native P2Rank validation
     valid_target = {
         "id": 101,
         "target_id": 101,
@@ -502,7 +561,15 @@ def test_molecular_generation_manager_strict_7_stage_target_validation_gate():
         "weed_sequence": "MVKLAARSTPGRSVVTALKPALSDQ",
         "structure_status": "ALPHA_FOLD_RETRIEVED",
         "pocket_prediction_status": "COMPLETED",
-        "pockets_json": [{"center": [12.0, 15.0, 18.0], "residues": ["SER", "ASP", "LYS", "TYR", "VAL"], "status": "COMPLETED"}]
+        "pocket_source": "P2Rank Native Binary",
+        "pocket_score": 14.5,
+        "pockets_json": [{
+            "center": [12.0, 15.0, 18.0],
+            "score": 14.5,
+            "source": "P2Rank Native Binary",
+            "residues": ["SER", "ASP", "LYS", "TYR", "VAL"],
+            "status": "COMPLETED"
+        }]
     }
     res_valid = manager.execute_generation_run(
         target_info=valid_target,
@@ -535,7 +602,11 @@ def test_top_n_candidate_limit_enforcement_up_to_500():
         "weed_species": "Amaranthus palmeri",
         "organism_verified": True,
         "weed_sequence": "MVKLAARSTPGRSVVTALKPALSDQ",
-        "pockets_json": [{"center": [12.0, 15.0, 18.0], "status": "COMPLETED"}]
+        "structure_status": "ALPHA_FOLD_RETRIEVED",
+        "pocket_prediction_status": "COMPLETED",
+        "pocket_source": "P2Rank Native Binary",
+        "pocket_score": 10.5,
+        "pockets_json": [{"center": [12.0, 15.0, 18.0], "source": "P2Rank Native Binary", "score": 10.5, "status": "COMPLETED"}]
     }
 
     res = manager.execute_generation_run(
@@ -655,7 +726,7 @@ def test_molecular_generation_api_crud_and_execution_lifecycle(client, db_sessio
         weed_sequence="MVKLAARSTPGRSVVTALKPALSDQ",
         is_primary_selected=True,
         essentiality_status="ESSENTIAL_KNOWN",
-        pockets_json=[{"center": [12.0, 15.0, 18.0], "status": "COMPLETED"}],
+        pockets_json=[{"center": [12.0, 15.0, 18.0], "source": "P2Rank Native Binary", "score": 12.5, "status": "COMPLETED"}],
         analysis_json={
             "gene_verified": True,
             "function_verified": True,
@@ -780,7 +851,7 @@ def test_discovery_pipeline_stage_3_executes_target_conditioned_generation(db_se
         weed_sequence="MVKLAARSTPGRSVVTALKP",
         is_primary_selected=True,
         essentiality_status="ESSENTIAL_KNOWN",
-        pockets_json=[{"center": [10.5, 20.2, 30.8], "status": "COMPLETED"}],
+        pockets_json=[{"center": [10.5, 20.2, 30.8], "source": "P2Rank Native Binary", "score": 9.8, "status": "COMPLETED"}],
         analysis_json={
             "gene_verified": True,
             "function_verified": True,

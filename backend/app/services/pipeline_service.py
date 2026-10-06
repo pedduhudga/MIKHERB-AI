@@ -515,6 +515,8 @@ class DiscoveryPipelineRunner:
                             "pockets_json": primary_target.pockets_json,
                             "pocket_center": p_center,
                             "pocket_prediction_status": validated_artifact.get("pocket_prediction_status", "COMPLETED" if p_center else "NO_POCKETS"),
+                            "pocket_source": primary_target.pockets_json[0].get("source") if (primary_target.pockets_json and isinstance(primary_target.pockets_json, list)) else None,
+                            "pocket_score": primary_target.pockets_json[0].get("score") if (primary_target.pockets_json and isinstance(primary_target.pockets_json, list)) else None,
                             "weed_accession_provenance": target_analysis.get("weed_accession_provenance") or validated_artifact.get("provenance")
                         }
 

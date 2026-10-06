@@ -68,11 +68,9 @@ class MolecularGenerationManager:
             return False, "TARGET_VALIDATION_GATE_ERROR: Target failed at stage [TARGET_DISCOVERED]. Both gene identifier and target_family must be specified.", None
 
         # Stage 2: TARGET_IDENTITY_VERIFIED (Strict affirmative True requirement; None or False is rejected)
+        # Provenance status alone cannot substitute for explicit target_identity_verified=True
         target_id = target_info.get("id") or target_info.get("target_id") or target_info.get("weed_uniprot_id") or target_info.get("uniprot_id")
         target_ident_ver = target_info.get("target_identity_verified")
-        prov_dict = target_info.get("weed_accession_provenance") or target_info.get("provenance") or {}
-        if target_ident_ver is None and isinstance(prov_dict, dict):
-            target_ident_ver = (prov_dict.get("provenance_status") == "VERIFIED")
 
         if not target_id:
             return False, "TARGET_VALIDATION_GATE_ERROR: Target failed at stage [TARGET_IDENTITY_VERIFIED]. Target ID or UniProt accession identifier must be resolved.", None
@@ -82,6 +80,7 @@ class MolecularGenerationManager:
 
         # Stage 3: GENE_VERIFIED (Strict affirmative True requirement; None or False is rejected)
         gene_verified = target_info.get("gene_verified")
+        prov_dict = target_info.get("weed_accession_provenance") or target_info.get("provenance") or {}
         if gene_verified is None and isinstance(prov_dict, dict):
             gene_verified = prov_dict.get("gene_verified")
         if gene_verified is not True:
@@ -115,27 +114,44 @@ class MolecularGenerationManager:
             return False, "TARGET_VALIDATION_GATE_ERROR: Target failed at stage [PROTEIN_VALIDATED]. Verified full biological protein sequence (minimum 20 amino acids) required.", None
 
         # Stage 7: STRUCTURE_POCKET_VALIDATED
-        # Require valid 3D binding pocket coordinates, non-failed status, and reject placeholder/failed/heuristic states
-        pockets = target_info.get("pockets_json") or target_info.get("pockets") or []
-        pocket_center = target_info.get("pocket_center")
-        first_pocket = pockets[0] if (isinstance(pockets, list) and len(pockets) > 0 and isinstance(pockets[0], dict)) else {}
-
-        if not pocket_center and first_pocket:
-            pocket_center = first_pocket.get("center")
-
-        pocket_pred_status = target_info.get("pocket_prediction_status") or first_pocket.get("status")
-        if str(pocket_pred_status).upper() in ["FAILED_EXECUTION", "FAILED_OUTPUT_PARSE", "NO_STRUCTURE", "NO_POCKETS", "HEURISTIC_ONLY", "NOT_INSTALLED", "FAILED"]:
-            return False, f"TARGET_VALIDATION_GATE_ERROR: Target failed at stage [STRUCTURE_POCKET_VALIDATED]. Pocket prediction failed with status [{pocket_pred_status}].", None
-
+        # Require verified AlphaFold / 3D structure
         struct_status = target_info.get("structure_status")
         if str(struct_status).upper() in ["STRUCTURE_UNAVAILABLE", "FAILED", "NOT_FOUND", "HEURISTIC_ONLY", "FAILED_EXECUTION"]:
             return False, f"TARGET_VALIDATION_GATE_ERROR: Target failed at stage [STRUCTURE_POCKET_VALIDATED]. 3D structure is unavailable [{struct_status}].", None
 
+        # Require explicit COMPLETED pocket prediction status
+        pockets = target_info.get("pockets_json") or target_info.get("pockets") or []
+        first_pocket = pockets[0] if (isinstance(pockets, list) and len(pockets) > 0 and isinstance(pockets[0], dict)) else {}
+
+        pocket_pred_status = target_info.get("pocket_prediction_status") or first_pocket.get("status")
+        if str(pocket_pred_status).upper() != "COMPLETED":
+            return False, f"TARGET_VALIDATION_GATE_ERROR: Target failed at stage [STRUCTURE_POCKET_VALIDATED]. Pocket prediction must be completed (got [{pocket_pred_status}]).", None
+
+        # Strict Native P2Rank requirement: source must be 'P2Rank Native Binary'
+        pocket_source = (
+            target_info.get("pocket_source")
+            or first_pocket.get("source")
+            or target_info.get("pocket_prediction_source")
+        )
+        if pocket_source != "P2Rank Native Binary":
+            return False, f"TARGET_VALIDATION_GATE_ERROR: Target failed at stage [STRUCTURE_POCKET_VALIDATED]. Pocket prediction must originate from P2Rank Native Binary (got '{pocket_source}').", None
+
+        # Strict Native P2Rank requirement: numerical pocket score
         pocket_score = target_info.get("pocket_score") or first_pocket.get("score")
-        pocket_source = target_info.get("pocket_source") or first_pocket.get("source") or target_info.get("pocket_prediction_source")
-        # Require verified pocket score and reject purely unvalidated surrogate geometry
         if pocket_score is None and first_pocket:
             pocket_score = first_pocket.get("p2rank_score")
+
+        if pocket_score is None:
+            return False, "TARGET_VALIDATION_GATE_ERROR: Target failed at stage [STRUCTURE_POCKET_VALIDATED]. Numerical P2Rank pocket score is required.", None
+        try:
+            float(pocket_score)
+        except (ValueError, TypeError):
+            return False, "TARGET_VALIDATION_GATE_ERROR: Target failed at stage [STRUCTURE_POCKET_VALIDATED]. Numerical P2Rank pocket score is required.", None
+
+        # Strict 3D binding pocket coordinates center [x, y, z]
+        pocket_center = target_info.get("pocket_center")
+        if not pocket_center and first_pocket:
+            pocket_center = first_pocket.get("center")
 
         if not pocket_center or not isinstance(pocket_center, (list, tuple)) or len(pocket_center) != 3:
             return False, "TARGET_VALIDATION_GATE_ERROR: Target failed at stage [STRUCTURE_POCKET_VALIDATED]. Target must have verified 3D binding pocket coordinates with center [x, y, z].", None

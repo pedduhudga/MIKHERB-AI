@@ -375,6 +375,8 @@ def execute_molecular_generation_run(
         "pockets_json": target.pockets_json,
         "pocket_center": p_center,
         "pocket_prediction_status": validated_artifact.get("pocket_prediction_status", "COMPLETED" if p_center else "NO_POCKETS"),
+        "pocket_source": target.pockets_json[0].get("source") if (target.pockets_json and isinstance(target.pockets_json, list)) else None,
+        "pocket_score": target.pockets_json[0].get("score") if (target.pockets_json and isinstance(target.pockets_json, list)) else None,
         "weed_accession_provenance": target_analysis.get("weed_accession_provenance") or validated_artifact.get("provenance")
     }
 
