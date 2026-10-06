@@ -218,3 +218,13 @@ export const fallbackAgentResponses: Record<string, string> = {
   docking: "Docking screening executed with GNINA & Boltz-2. Lead compound MH-ALS-00127 demonstrated -10.8 kcal/mol binding affinity and 9.35 pKd with validated pose agreement.",
   formulation: "Formulation assessment: Suspension concentrate (SC) or Emulsifiable concentrate (EC) with Tween 80 surfactant yields optimum foliar penetration and 94.5% stability score."
 };
+
+export const fallbackStages = [
+  { stage_order: 1, stage_name: "Multi-Target Discovery & Structure Acquisition", status: "completed", results_summary: { targets_found: 3, top_gene: "ALS", alphafold_plddt: 91.8 } },
+  { stage_order: 2, stage_name: "Binding Pocket Prediction", status: "completed", results_summary: { p2rank_pockets: 2, top_pocket_score: 14.5, active_site: "Centroid [12.0, 15.0, 18.0]" } },
+  { stage_order: 3, stage_name: "Chemical Library Acquisition & RDKit Cleaning", status: "completed", results_summary: { screened_compounds: 2480, valid_lipinski: 2190, filtered: 290 } },
+  { stage_order: 4, stage_name: "Boltz-2 & GNINA AI Docking Screening", status: "completed", results_summary: { boltz_screened: 24, gnina_docked: 24, consensus_agreement: "HIGH" } },
+  { stage_order: 5, stage_name: "Weed vs Crop Selectivity Analysis", status: "completed", results_summary: { crop_divergence_pct: 34.2, selectivity_index: 94.2, crop_safety: "High" } },
+  { stage_order: 6, stage_name: "Safety, Toxicity & Novelty Screening", status: "completed", results_summary: { brics_novelty: "POTENTIALLY_NOVEL", toxicity_alerts: 0, aquatic_risk: "LOW" } },
+  { stage_order: 7, stage_name: "Consensus Candidate Ranking & Report Generation", status: "completed", results_summary: { ranked_candidates: 3, lead_compound: "MH-ALS-00127", mikherb_score: 95.8 } }
+];

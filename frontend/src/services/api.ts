@@ -5,7 +5,8 @@ import {
   fallbackTargets,
   fallbackCandidates,
   fallbackFormulation,
-  fallbackAgentResponses
+  fallbackAgentResponses,
+  fallbackStages
 } from './mockData';
 
 // API Base URL configured via environment variables for Vercel deployment
@@ -115,6 +116,20 @@ export const api = {
     const p = localProjectsCache.find(x => x.id === projectId);
     if (p) p.status = 'completed';
     return { status: "completed", message: "Pipeline executed successfully" };
+  },
+
+  getProjectStages: async (projectId: number) => {
+    try {
+      const headers = await getAuthHeaders(false);
+      const res = await fetch(`${API_BASE_URL}/api/v1/projects/${projectId}/stages`, { headers, signal: AbortSignal.timeout(4000) });
+      if (res.ok) {
+        const live = await res.json();
+        if (Array.isArray(live) && live.length > 0) return live;
+      }
+    } catch (e) {
+      console.warn("Backend stages endpoint unreachable, returning default stages:", e);
+    }
+    return fallbackStages;
   },
 
   getTargets: async (projectId: number) => {

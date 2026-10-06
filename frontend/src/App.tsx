@@ -28,6 +28,7 @@ export default function App() {
   const [selectedTarget, setSelectedTarget] = useState<TargetProtein | null>(null);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
+  const [stages, setStages] = useState<any[]>([]);
   const [experimentalQueue, setExperimentalQueue] = useState<QueuedItem[]>([]);
 
   // UI state & alerts
@@ -118,7 +119,17 @@ export default function App() {
         setSelectedProject(initial);
         fetchCandidates(initial.id);
         fetchTargets(initial.id);
+        fetchStages(initial.id);
       }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const fetchStages = async (projId: number) => {
+    try {
+      const data = await api.getProjectStages(projId);
+      setStages(data);
     } catch (e) {
       console.error(e);
     }
@@ -154,6 +165,7 @@ export default function App() {
     setSelectedProject(proj);
     fetchCandidates(proj.id);
     fetchTargets(proj.id);
+    fetchStages(proj.id);
     showToast(`Active project: ${proj.name}`);
   };
 
@@ -546,6 +558,55 @@ export default function App() {
                   })}
                 </div>
               </div>
+
+              {/* Automated 7-Stage Discovery Pipeline Progress (PRD Architecture) */}
+              {stages.length > 0 && (
+                <div className="bg-slate-900/80 border border-slate-800/90 rounded-2xl p-5 space-y-3.5 backdrop-blur-sm shadow-xl shadow-black/40">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-bold text-sm text-white font-heading flex items-center gap-2">
+                        <Activity className="w-4 h-4 text-emerald-400" /> Automated Discovery Pipeline Execution
+                      </h3>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        End-to-end multi-stage pipeline: Biology → Target → Pocket → RDKit → GNINA/Boltz-2 → Selectivity → MikHerb Consensus.
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-mono px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">
+                      7 Stages Defined
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-2 pt-1">
+                    {stages.map((st: any) => (
+                      <div
+                        key={st.stage_order}
+                        className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition ${
+                          st.status === 'completed'
+                            ? 'bg-slate-950/70 border-emerald-500/40 text-emerald-300'
+                            : st.status === 'running'
+                            ? 'bg-emerald-950/40 border-emerald-400 text-white animate-pulse'
+                            : 'bg-slate-950/40 border-slate-800/80 text-slate-500'
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center justify-between text-[10px] font-mono font-bold mb-1">
+                            <span>Stage {st.stage_order}</span>
+                            <span className={st.status === 'completed' ? 'text-emerald-400' : 'text-slate-500'}>
+                              {st.status === 'completed' ? '✓' : st.status === 'running' ? '●' : '○'}
+                            </span>
+                          </div>
+                          <div className="text-[11px] font-semibold text-slate-200 line-clamp-2 leading-tight">
+                            {st.stage_name}
+                          </div>
+                        </div>
+                        <div className="mt-2 text-[10px] text-slate-400 font-mono">
+                          {st.status.toUpperCase()}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Lead Candidate Details Card */}
               {selectedCandidate && (
