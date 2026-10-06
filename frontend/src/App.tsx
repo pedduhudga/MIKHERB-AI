@@ -7,7 +7,7 @@ import { api } from './services/api';
 import {
   Dna, Beaker, FlaskConical, TestTube, Cpu, ShieldAlert, Bot, Plus, Play, ArrowRight, Sparkles,
   Search, Download, Copy, Check, CheckCircle2, Loader2, ListFilter, Activity, ChevronRight,
-  Atom
+  Atom, X
 } from 'lucide-react';
 
 interface QueuedItem {
@@ -45,13 +45,32 @@ export default function App() {
   const [newCrop, setNewCrop] = useState('Soybean (Glycine max)');
   const [newObj, setNewObj] = useState('new_herbicide');
 
-  // Formulation Lab
+  // Formulation Lab & Ingredient Matrix
   const [formName, setFormName] = useState('MikHerb-EC100 Formulation');
   const [activeIng, setActiveIng] = useState('MH-ALS-00127 (ALS Inhibitor)');
   const [conc, setConc] = useState(120);
   const [solvent, setSolvent] = useState('Water');
   const [surfactant, setSurfactant] = useState('Tween 80');
+  const [adjuvant, setAdjuvant] = useState('Ammonium Sulfate (Liquid)');
+  const [buffer, setBuffer] = useState('None');
+  const [customSolventInput, setCustomSolventInput] = useState('');
+  const [customSurfactantInput, setCustomSurfactantInput] = useState('');
+  const [solventList, setSolventList] = useState(['Water', 'Mineral Oil', 'Solvesso 150', 'Methylated Seed Oil (MSO)', 'Propylene Glycol', 'Diesel / Crop Oil Concentrate']);
+  const [surfactantList, setSurfactantList] = useState(['Tween 80', 'Silwet L-77', 'Span 20', 'Nonylphenol Ethoxylate', 'Alcohol Ethoxylate (Bio-adjuvant)', 'Lecithin (Natural Bio-surfactant)']);
+  const [customAdjuvantInput, setCustomAdjuvantInput] = useState('');
+  const [adjuvantList, setAdjuvantList] = useState(['Ammonium Sulfate (Liquid)', 'Citric Acid Water Conditioner', 'Silicone Penetrant', 'Fulvic Acid Bio-chelator', 'None']);
   const [formResult, setFormResult] = useState<any>(null);
+
+  // New Ingredient Modal / Drawer
+  const [showAddIngredientModal, setShowAddIngredientModal] = useState(false);
+  const [newIngCode, setNewIngCode] = useState('');
+  const [newIngName, setNewIngName] = useState('');
+  const [newIngSmiles, setNewIngSmiles] = useState('');
+  const [newIngTarget, setNewIngTarget] = useState('ALS / AHAS');
+  const [newIngIc50, setNewIngIc50] = useState('10.0 nM');
+  const [newIngMw, setNewIngMw] = useState(320.0);
+  const [newIngLogP, setNewIngLogP] = useState(1.5);
+  const [newIngStatus, setNewIngStatus] = useState('NOVEL INGREDIENT');
 
   // Chemistry Library Filter
   const [chemSearch, setChemSearch] = useState('');
@@ -313,15 +332,70 @@ export default function App() {
     setTimeout(() => setCopiedSmiles(null), 2500);
   };
 
-  // Chemical Libraries Data
-  const chemicalLibrary = [
+  // Chemical Libraries & Novel Ingredients Data
+  const [chemicalLibrary, setChemicalLibrary] = useState([
     { code: "MH-REF-001", name: "Imazethapyr Analog", smiles: "CC1=NC(=C(C=C1)C(=O)O)C2=NC(=O)NC2(C)C(C)C", target: "ALS / AHAS", ic50: "18 nM", status: "BENCHMARK", mw: 289.3, logp: 1.4 },
     { code: "MH-REF-002", name: "Chlorsulfuron Standard", smiles: "COC1=NC(=NC(=N1)C)NC(=O)NS(=O)(=O)C2=CC=CC=C2Cl", target: "ALS / AHAS", ic50: "5.4 nM", status: "COMMERCIAL", mw: 357.8, logp: -0.9 },
     { code: "MH-SYN-042", name: "MikHerb AI Lead 042", smiles: "CC1=C(C(=O)NC(=O)N1)C2=CC=CC=C2S(=O)(=O)NC(=O)NC3=NC(=CC=N3)OC", target: "ALS Catalytic", ic50: "2.1 nM", status: "ACTIVE LEAD", mw: 399.4, logp: 1.25 },
     { code: "MH-REF-003", name: "Acifluorfen Standard", smiles: "O=C(O)C1=CC(=C(C=C1)OC2=CC=C(C=C2Cl)C(F)(F)F)[N+](=O)[O-]", target: "PPO Oxidase", ic50: "12.0 nM", status: "COMMERCIAL", mw: 361.7, logp: 3.1 },
     { code: "MH-SYN-088", name: "MikHerb PPO Hit 088", smiles: "FC(F)(F)C1=CC=C(C=C1)OC2=CC=C(C=C2)C(=O)NC3=CC=C(C=C3)C(=O)O", target: "PPO Oxidase", ic50: "4.8 nM", status: "ACTIVE LEAD", mw: 385.2, logp: 2.8 },
     { code: "MH-REF-004", name: "Glyphosate Reference", smiles: "C(C(=O)O)NCP(=O)(O)O", target: "EPSPS", ic50: "45.0 nM", status: "BENCHMARK", mw: 169.1, logp: -3.2 }
-  ];
+  ]);
+
+  const handleAddCustomIngredient = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newIngCode.trim() || !newIngName.trim() || !newIngSmiles.trim()) {
+      showToast("Please provide Compound Code, Chemical Name, and SMILES");
+      return;
+    }
+    const newMol = {
+      code: newIngCode.trim(),
+      name: newIngName.trim(),
+      smiles: newIngSmiles.trim(),
+      target: newIngTarget,
+      ic50: newIngIc50 || "10.0 nM",
+      status: newIngStatus,
+      mw: Number(newIngMw) || 300.0,
+      logp: Number(newIngLogP) || 1.5
+    };
+    setChemicalLibrary(prev => [newMol, ...prev]);
+    showToast(`Added new active ingredient: ${newMol.code}`);
+    setShowAddIngredientModal(false);
+    // Reset form
+    setNewIngCode('');
+    setNewIngName('');
+    setNewIngSmiles('');
+  };
+
+  const handleAddCustomSolvent = () => {
+    if (!customSolventInput.trim()) return;
+    if (!solventList.includes(customSolventInput.trim())) {
+      setSolventList(prev => [...prev, customSolventInput.trim()]);
+    }
+    setSolvent(customSolventInput.trim());
+    setCustomSolventInput('');
+    showToast(`Added new formulation solvent: ${customSolventInput.trim()}`);
+  };
+
+  const handleAddCustomSurfactant = () => {
+    if (!customSurfactantInput.trim()) return;
+    if (!surfactantList.includes(customSurfactantInput.trim())) {
+      setSurfactantList(prev => [...prev, customSurfactantInput.trim()]);
+    }
+    setSurfactant(customSurfactantInput.trim());
+    setCustomSurfactantInput('');
+    showToast(`Added new formulation surfactant: ${customSurfactantInput.trim()}`);
+  };
+
+  const handleAddCustomAdjuvant = () => {
+    if (!customAdjuvantInput.trim()) return;
+    if (!adjuvantList.includes(customAdjuvantInput.trim())) {
+      setAdjuvantList(prev => [...prev, customAdjuvantInput.trim()]);
+    }
+    setAdjuvant(customAdjuvantInput.trim());
+    setCustomAdjuvantInput('');
+    showToast(`Added new formulation adjuvant: ${customAdjuvantInput.trim()}`);
+  };
 
   const filteredChemistry = chemicalLibrary.filter(item => {
     const matchesSearch = item.code.toLowerCase().includes(chemSearch.toLowerCase()) ||
@@ -1027,6 +1101,12 @@ export default function App() {
                   {filteredChemistry.length} Filtered Molecules
                 </span>
                 <button
+                  onClick={() => setShowAddIngredientModal(true)}
+                  className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition shadow-md shadow-emerald-500/20"
+                >
+                  <Plus className="w-3.5 h-3.5 stroke-[3]" /> Register New Ingredient
+                </button>
+                <button
                   onClick={() => {
                     const csv = "data:text/csv;charset=utf-8," 
                       + "Code,Name,SMILES,Target,IC50,Status\n"
@@ -1139,37 +1219,211 @@ export default function App() {
               <h2 className="font-bold text-lg text-white font-heading flex items-center gap-2">
                 <FlaskConical className="w-5 h-5 text-emerald-400" /> Formulation Lab & Compatibility Engine
               </h2>
-              <div className="space-y-3.5 text-xs">
+              <div className="space-y-4 text-xs">
+                {/* Active Ingredient Selector / Adder */}
                 <div>
-                  <label className="block text-slate-400 font-medium mb-1">Formulation Name</label>
-                  <input type="text" value={formName} onChange={e => setFormName(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-slate-200 focus:outline-none focus:border-emerald-500 transition" />
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-slate-300 font-semibold flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-emerald-400" /> Active Ingredient (AI) Molecule
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddIngredientModal(true)}
+                      className="text-emerald-400 hover:text-emerald-300 font-bold text-[11px] flex items-center gap-1 bg-emerald-500/10 hover:bg-emerald-500/20 px-2 py-0.5 rounded-lg border border-emerald-500/30 transition"
+                    >
+                      <Plus className="w-3 h-3 stroke-[3]" /> Add New Ingredient
+                    </button>
+                  </div>
+
+                  {/* Dropdown to select from all available library ingredients + candidates */}
+                  <select
+                    value={activeIng}
+                    onChange={e => {
+                      setActiveIng(e.target.value);
+                      const selectedItem = chemicalLibrary.find(c => `${c.code} - ${c.name}` === e.target.value);
+                      if (selectedItem) {
+                        setFormName(`MikHerb-EC-${selectedItem.code.replace('MH-', '')}`);
+                      }
+                    }}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-slate-200 focus:outline-none focus:border-emerald-500 transition font-mono"
+                  >
+                    <optgroup label="✨ Lead AI Screened Candidates">
+                      {candidates.map(c => (
+                        <option key={c.id} value={`${c.compound_code} (${c.smiles.slice(0, 24)}...)`}>
+                          {c.compound_code} — {c.target_name} (Score: {c.mikherb_score || 95.8}/100)
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="🧪 Chemical Library Active Ingredients">
+                      {chemicalLibrary.map(c => (
+                        <option key={c.code} value={`${c.code} - ${c.name}`}>
+                          {c.code} — {c.name} ({c.target}, IC50: {c.ic50})
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
+
+                  {/* Quick-type custom active ingredient or SMILES */}
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Or type custom active name / SMILES directly..."
+                      value={activeIng}
+                      onChange={e => setActiveIng(e.target.value)}
+                      className="flex-1 bg-slate-950/80 border border-slate-800 rounded-xl px-3 py-2 text-slate-300 focus:outline-none focus:border-emerald-500 transition text-[11px] font-mono"
+                    />
+                  </div>
                 </div>
+
+                {/* Formulation Prototype Name */}
                 <div>
-                  <label className="block text-slate-400 font-medium mb-1">Active Ingredient Lead</label>
-                  <input type="text" value={activeIng} onChange={e => setActiveIng(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-slate-200 focus:outline-none focus:border-emerald-500 transition" />
+                  <label className="block text-slate-400 font-medium mb-1">Formulation Prototype Name</label>
+                  <input
+                    type="text"
+                    value={formName}
+                    onChange={e => setFormName(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-slate-200 focus:outline-none focus:border-emerald-500 transition"
+                  />
                 </div>
+
+                {/* Concentration */}
                 <div>
-                  <label className="block text-slate-400 font-medium mb-1">Concentration (g/L)</label>
-                  <input type="number" value={conc} onChange={e => setConc(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-slate-200 focus:outline-none focus:border-emerald-500 transition" />
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-slate-400 font-medium">Active Concentration (g/L)</label>
+                    <span className="font-mono text-emerald-400 font-bold">{conc} g/L</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="10"
+                    max="500"
+                    step="10"
+                    value={conc}
+                    onChange={e => setConc(Number(e.target.value))}
+                    className="w-full accent-emerald-400 cursor-pointer"
+                  />
+                  <div className="flex justify-between text-[10px] text-slate-500 font-mono mt-0.5">
+                    <span>10 g/L (Ultra-low volume)</span>
+                    <span>250 g/L (Standard EC/SC)</span>
+                    <span>500 g/L (High Load)</span>
+                  </div>
                 </div>
+
+                {/* Solvent System with custom adder */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-slate-400 font-medium">Carrier / Solvent System</label>
+                    <span className="text-[10px] text-slate-500">{solventList.length} Options</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <select
+                      value={solvent}
+                      onChange={e => setSolvent(e.target.value)}
+                      className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500 transition"
+                    >
+                      {solventList.map(s => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex gap-1.5 mt-1.5">
+                    <input
+                      type="text"
+                      placeholder="Add custom solvent (e.g. Bio-diesel, N-Methyl-2-pyrrolidone)..."
+                      value={customSolventInput}
+                      onChange={e => setCustomSolventInput(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddCustomSolvent(); } }}
+                      className="flex-1 bg-slate-950/70 border border-slate-800 rounded-lg px-2.5 py-1 text-[11px] text-slate-300 focus:outline-none focus:border-emerald-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddCustomSolvent}
+                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[11px] font-semibold border border-slate-700"
+                    >
+                      + Add
+                    </button>
+                  </div>
+                </div>
+
+                {/* Surfactants & Emulsifiers */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-slate-400 font-medium">Surfactant / Emulsifier</label>
+                    <span className="text-[10px] text-slate-500">{surfactantList.length} Options</span>
+                  </div>
+                  <select
+                    value={surfactant}
+                    onChange={e => setSurfactant(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500 transition"
+                  >
+                    {surfactantList.map(sur => (
+                      <option key={sur} value={sur}>{sur}</option>
+                    ))}
+                  </select>
+                  <div className="flex gap-1.5 mt-1.5">
+                    <input
+                      type="text"
+                      placeholder="Add custom surfactant (e.g. Polysorbate 20, Castor oil ethoxylate)..."
+                      value={customSurfactantInput}
+                      onChange={e => setCustomSurfactantInput(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddCustomSurfactant(); } }}
+                      className="flex-1 bg-slate-950/70 border border-slate-800 rounded-lg px-2.5 py-1 text-[11px] text-slate-300 focus:outline-none focus:border-emerald-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddCustomSurfactant}
+                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[11px] font-semibold border border-slate-700"
+                    >
+                      + Add
+                    </button>
+                  </div>
+                </div>
+
+                {/* Adjuvants & Acid/Base Buffer */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-slate-400 font-medium mb-1">Solvent System</label>
-                    <select value={solvent} onChange={e => setSolvent(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-slate-200 focus:outline-none focus:border-emerald-500 transition">
-                      <option value="Water">Deionized Water (Aqueous)</option>
-                      <option value="Mineral Oil">Mineral Oil (Emulsifiable)</option>
-                      <option value="Solvesso 150">Solvesso 150 (Aromatic)</option>
+                    <label className="block text-slate-400 font-medium mb-1">Adjuvant / Penetrant</label>
+                    <select
+                      value={adjuvant}
+                      onChange={e => setAdjuvant(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500 transition"
+                    >
+                      {adjuvantList.map(a => (
+                        <option key={a} value={a}>{a}</option>
+                      ))}
                     </select>
+                    <div className="flex gap-1.5 mt-1.5">
+                      <input
+                        type="text"
+                        placeholder="Add custom adjuvant..."
+                        value={customAdjuvantInput}
+                        onChange={e => setCustomAdjuvantInput(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddCustomAdjuvant(); } }}
+                        className="flex-1 bg-slate-950/70 border border-slate-800 rounded-lg px-2.5 py-1 text-[11px] text-slate-300 focus:outline-none focus:border-emerald-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddCustomAdjuvant}
+                        className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[11px] font-semibold border border-slate-700"
+                      >
+                        + Add
+                      </button>
+                    </div>
                   </div>
                   <div>
-                    <label className="block text-slate-400 font-medium mb-1">Surfactant / Adjuvant</label>
-                    <select value={surfactant} onChange={e => setSurfactant(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-slate-200 focus:outline-none focus:border-emerald-500 transition">
-                      <option value="Tween 80">Tween 80 (Non-ionic)</option>
-                      <option value="Silwet L-77">Silwet L-77 (Organosilicone)</option>
-                      <option value="Span 20">Span 20 (Sorbitan)</option>
+                    <label className="block text-slate-400 font-medium mb-1">pH Buffer System</label>
+                    <select
+                      value={buffer}
+                      onChange={e => setBuffer(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500 transition"
+                    >
+                      <option value="None">None (Unbuffered)</option>
+                      <option value="Citrate Buffer (pH 4.8)">Citrate Buffer (pH 4.8)</option>
+                      <option value="Phosphate Buffer (pH 6.8)">Phosphate Buffer (pH 6.8)</option>
+                      <option value="Amine Salt Buffer (pH 8.2)">Amine Salt Buffer (pH 8.2)</option>
                     </select>
                   </div>
                 </div>
+
                 <button
                   onClick={handleAnalyzeFormulation}
                   disabled={formulationLoading}
@@ -1357,6 +1611,150 @@ export default function App() {
         )}
 
       </main>
+
+      {/* Register New Active Ingredient Modal */}
+      {showAddIngredientModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg p-6 space-y-5 shadow-2xl shadow-black/80 relative">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-400 border border-emerald-500/20">
+                  <Beaker className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-white font-heading">Register New Active Herbicide Ingredient</h3>
+                  <p className="text-[11px] text-slate-400">Add a novel molecule or scaffold to chemical libraries & formulation matrix.</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAddIngredientModal(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddCustomIngredient} className="space-y-3.5 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-400 font-medium mb-1">Compound Code</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. MH-BIO-099"
+                    value={newIngCode}
+                    onChange={e => setNewIngCode(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-400 font-medium mb-1">Target Enzyme Family</label>
+                  <select
+                    value={newIngTarget}
+                    onChange={e => setNewIngTarget(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="ALS / AHAS">ALS / AHAS</option>
+                    <option value="PPO Oxidase">PPO Oxidase</option>
+                    <option value="EPSPS">EPSPS</option>
+                    <option value="Photosystem II">Photosystem II (PSII)</option>
+                    <option value="HPPD">HPPD</option>
+                    <option value="Glutamine Synthetase">Glutamine Synthetase</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-400 font-medium mb-1">Chemical / Common Name</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Novel Triazolinone Bio-Derivative"
+                  value={newIngName}
+                  onChange={e => setNewIngName(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 font-medium mb-1">SMILES Scaffolding String</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. CC1=CC=C(C=C1)S(=O)(=O)NC(=O)NC2=NC(=NC(=N2)C)OC"
+                  value={newIngSmiles}
+                  onChange={e => setNewIngSmiles(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 font-mono text-[11px] focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-3 gap-2.5">
+                <div>
+                  <label className="block text-slate-400 font-medium mb-1">IC50 Value</label>
+                  <input
+                    type="text"
+                    value={newIngIc50}
+                    onChange={e => setNewIngIc50(e.target.value)}
+                    placeholder="e.g. 3.4 nM"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-slate-200 font-mono focus:outline-none focus:border-emerald-500 text-[11px]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-400 font-medium mb-1">MW (g/mol)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={newIngMw}
+                    onChange={e => setNewIngMw(Number(e.target.value))}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-slate-200 font-mono focus:outline-none focus:border-emerald-500 text-[11px]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-400 font-medium mb-1">LogP</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={newIngLogP}
+                    onChange={e => setNewIngLogP(Number(e.target.value))}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-slate-200 font-mono focus:outline-none focus:border-emerald-500 text-[11px]"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-400 font-medium mb-1">Ingredient Status</label>
+                <select
+                  value={newIngStatus}
+                  onChange={e => setNewIngStatus(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="NOVEL INGREDIENT">NOVEL INGREDIENT</option>
+                  <option value="ACTIVE LEAD">ACTIVE LEAD</option>
+                  <option value="BENCHMARK">BENCHMARK</option>
+                  <option value="COMMERCIAL">COMMERCIAL</option>
+                </select>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowAddIngredientModal(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-bold rounded-xl transition shadow-lg shadow-emerald-500/20 flex items-center gap-1.5"
+                >
+                  <Plus className="w-4 h-4 stroke-[3]" /> Register & Add
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
