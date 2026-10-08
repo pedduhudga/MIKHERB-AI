@@ -1,12 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 
 interface ViewerProps {
+  targetId?: number;
+  uniprotId?: string;
   pdbId?: string;
   height?: string;
   styleMode?: 'cartoon' | 'stick' | 'sphere';
 }
 
-// Fallback minimal PDB backbone in case external RCSB network fetch is restricted or offline
+// Fallback minimal PDB backbone in case external structure fetch is restricted or offline
 const MINIMAL_PDB = `HEADER    PROTEIN                                 06-OCT-26   1YI2              
 ATOM      1  N   ALA A   1      20.154  11.234  15.670  1.00 20.00           N  
 ATOM      2  CA  ALA A   1      21.234  12.100  16.120  1.00 20.00           C  
@@ -34,10 +36,10 @@ TER      23      TYR A   5
 END                                                                             
 `;
 
-export const ProteinViewer3D: React.FC<ViewerProps> = ({ pdbId = "1YI2", height = "350px", styleMode = "cartoon" }) => {
+export const ProteinViewer3D: React.FC<ViewerProps> = ({ targetId, uniprotId, pdbId = "1YI2", height = "350px", styleMode = "cartoon" }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
-  const [source, setSource] = useState<string>("RCSB PDB");
+  const [source, setSource] = useState<string>("3D Structure");
 
   useEffect(() => {
     let isMounted = true;
@@ -65,23 +67,72 @@ export const ProteinViewer3D: React.FC<ViewerProps> = ({ pdbId = "1YI2", height 
       };
 
       setLoading(true);
-      fetch(`https://files.rcsb.org/download/${pdbId}.pdb`, { signal: AbortSignal.timeout(3500) })
-        .then(res => {
-          if (!res.ok) throw new Error("RCSB fetch status: " + res.status);
-          return res.text();
-        })
-        .then(data => {
-          renderData(data, `RCSB PDB: ${pdbId}`);
-        })
-        .catch(() => {
-          renderData(MINIMAL_PDB, `AlphaFold Synthetic Cache (${pdbId})`);
-        });
+
+      const loadStructure = async () => {
+        // 1. Try backend target PDB endpoint if targetId provided
+        if (targetId) {
+          try {
+            const resp = await fetch(`/api/v1/targets/${targetId}/pdb`, { signal: AbortSignal.timeout(3500) });
+            if (resp.ok) {
+              const text = await resp.text();
+              if (text && text.includes("ATOM")) {
+                renderData(text, `Target ${targetId} Structure`);
+                return;
+              }
+            }
+          } catch (e) {
+            // Fallthrough
+          }
+        }
+
+        const effectiveUniprot = uniprotId || (pdbId && pdbId.length > 4 ? pdbId : null);
+
+        // 2. Try AlphaFold DB if UniProt ID provided
+        if (effectiveUniprot) {
+          const cleanAcc = effectiveUniprot.replace(/^AF-/, '').replace(/-F1$/, '');
+          try {
+            const afUrl = `https://alphafold.ebi.ac.uk/files/AF-${cleanAcc}-F1-model_v4.pdb`;
+            const resp = await fetch(afUrl, { signal: AbortSignal.timeout(3500) });
+            if (resp.ok) {
+              const text = await resp.text();
+              if (text && text.includes("ATOM")) {
+                renderData(text, `AlphaFold DB: ${cleanAcc}`);
+                return;
+              }
+            }
+          } catch (e) {
+            // Fallthrough
+          }
+        }
+
+        // 3. Try RCSB PDB if pdbId is a 4-character ID
+        if (pdbId && pdbId.length === 4) {
+          try {
+            const rcsbUrl = `https://files.rcsb.org/download/${pdbId}.pdb`;
+            const resp = await fetch(rcsbUrl, { signal: AbortSignal.timeout(3500) });
+            if (resp.ok) {
+              const text = await resp.text();
+              if (text && text.includes("ATOM")) {
+                renderData(text, `RCSB PDB: ${pdbId}`);
+                return;
+              }
+            }
+          } catch (e) {
+            // Fallthrough
+          }
+        }
+
+        // 4. Fallback minimal backbone
+        renderData(MINIMAL_PDB, `Structure Cache (${effectiveUniprot || pdbId})`);
+      };
+
+      loadStructure();
     }
 
     return () => {
       isMounted = false;
     };
-  }, [pdbId, styleMode]);
+  }, [targetId, uniprotId, pdbId, styleMode]);
 
   return (
     <div className="relative rounded-lg overflow-hidden border border-slate-800 bg-slate-950">
