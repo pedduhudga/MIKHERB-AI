@@ -37,7 +37,7 @@ END
 export const ProteinViewer3D: React.FC<ViewerProps> = ({ pdbId = "1YI2", height = "350px", styleMode = "cartoon" }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
-  const [source, setSource] = useState<string>("RCSB PDB");
+  const [source, setSource] = useState<string>("3Dmol.js");
 
   useEffect(() => {
     let isMounted = true;
@@ -65,17 +65,53 @@ export const ProteinViewer3D: React.FC<ViewerProps> = ({ pdbId = "1YI2", height 
       };
 
       setLoading(true);
-      fetch(`https://files.rcsb.org/download/${pdbId}.pdb`, { signal: AbortSignal.timeout(3500) })
-        .then(res => {
-          if (!res.ok) throw new Error("RCSB fetch status: " + res.status);
-          return res.text();
-        })
-        .then(data => {
-          renderData(data, `RCSB PDB: ${pdbId}`);
-        })
-        .catch(() => {
-          renderData(MINIMAL_PDB, `AlphaFold Synthetic Cache (${pdbId})`);
-        });
+
+      const isNumericTargetId = /^\d+$/.test(pdbId.trim()) || pdbId.startsWith("target-");
+      const cleanId = pdbId.trim().replace(/^target-/, "");
+
+      if (isNumericTargetId) {
+        fetch(`/api/v1/targets/${cleanId}/pdb`, { signal: AbortSignal.timeout(4000) })
+          .then(res => {
+            if (!res.ok) throw new Error("Target PDB fetch status: " + res.status);
+            return res.text();
+          })
+          .then(data => {
+            if (data && data.includes("ATOM")) {
+              renderData(data, `Target Model #${cleanId}`);
+            } else {
+              throw new Error("Invalid PDB content");
+            }
+          })
+          .catch(() => {
+            renderData(MINIMAL_PDB, `AlphaFold Synthetic Cache (${pdbId})`);
+          });
+      } else if (pdbId.startsWith("AF-") || /^[A-Z0-9]{6,10}$/i.test(pdbId)) {
+        const accId = pdbId.replace(/^AF-/, "").replace(/-F1$/, "");
+        const afUrl = `https://alphafold.ebi.ac.uk/files/AF-${accId}-F1-model_v4.pdb`;
+        fetch(afUrl, { signal: AbortSignal.timeout(4000) })
+          .then(res => {
+            if (!res.ok) throw new Error("AlphaFold fetch status: " + res.status);
+            return res.text();
+          })
+          .then(data => {
+            renderData(data, `AlphaFold DB: ${accId}`);
+          })
+          .catch(() => {
+            renderData(MINIMAL_PDB, `AlphaFold Synthetic Cache (${pdbId})`);
+          });
+      } else {
+        fetch(`https://files.rcsb.org/download/${pdbId}.pdb`, { signal: AbortSignal.timeout(3500) })
+          .then(res => {
+            if (!res.ok) throw new Error("RCSB fetch status: " + res.status);
+            return res.text();
+          })
+          .then(data => {
+            renderData(data, `RCSB PDB: ${pdbId}`);
+          })
+          .catch(() => {
+            renderData(MINIMAL_PDB, `AlphaFold Synthetic Cache (${pdbId})`);
+          });
+      }
     }
 
     return () => {

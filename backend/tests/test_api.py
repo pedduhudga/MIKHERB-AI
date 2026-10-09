@@ -328,4 +328,48 @@ def test_strict_project_ownership_no_null_exposure():
     db.close()
 
 
+def test_get_target_pdb_endpoint(tmp_path):
+    """Verify that /api/v1/targets/{target_id}/pdb serves target PDB content and handles missing targets."""
+    from app.db.database import SessionLocal
+    from app.models.models import Project, TargetProtein
+
+    db = SessionLocal()
+    try:
+        proj = Project(
+            name="Target PDB Test Project",
+            weed_species="Palmer Amaranth",
+            crop_species="Soybean",
+            objective="new_herbicide"
+        )
+        db.add(proj)
+        db.commit()
+        db.refresh(proj)
+
+        dummy_pdb = str(tmp_path / "test_target.pdb")
+        dummy_pdb_text = "HEADER    TEST TARGET PDB\nATOM      1  CA  MET A   1      10.000  10.000  10.000  1.00 90.00           C\nEND\n"
+        with open(dummy_pdb, "w") as f:
+            f.write(dummy_pdb_text)
+
+        target = TargetProtein(
+            project_id=proj.id,
+            name="ALS Target Protein",
+            gene="ALS",
+            target_family="ALS / AHAS",
+            pdb_id=dummy_pdb,
+            uniprot_id="P10324"
+        )
+        db.add(target)
+        db.commit()
+        db.refresh(target)
+
+        # 1. Fetch valid target PDB -> 200 with text/plain content
+        resp = client.get(f"/api/v1/targets/{target.id}/pdb")
+        assert resp.status_code == 200
+        assert "TEST TARGET PDB" in resp.text
+
+        # 2. Fetch non-existent target ID -> 404
+        resp_404 = client.get("/api/v1/targets/99999/pdb")
+        assert resp_404.status_code == 404
+    finally:
+        db.close()
 
