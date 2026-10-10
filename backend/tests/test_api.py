@@ -328,4 +328,53 @@ def test_strict_project_ownership_no_null_exposure():
     db.close()
 
 
+def test_get_target_pdb_endpoint():
+    """Verify target PDB structure retrieval endpoint works and returns 404 appropriately."""
+    from app.db.database import SessionLocal
+    from app.models.models import Project, TargetProtein
+    import tempfile, os
+
+    db = SessionLocal()
+    try:
+        # Create a test project and target with a dummy PDB file
+        p = Project(
+            name="Target PDB Test Project",
+            weed_species="Palmer Amaranth",
+            crop_species="Soybean",
+            objective="new_herbicide"
+        )
+        db.add(p)
+        db.commit()
+
+        with tempfile.NamedTemporaryFile(suffix=".pdb", mode="w", delete=False) as tmp:
+            tmp.write("ATOM      1  CA  ALA A   1      20.154  11.234  15.670  1.00 20.00           C\nEND\n")
+            pdb_file_path = tmp.name
+
+        t = TargetProtein(
+            project_id=p.id,
+            name="Test Target ALS",
+            uniprot_id="A0A890DLI3",
+            pdb_id=pdb_file_path
+        )
+        db.add(t)
+        db.commit()
+
+        # 1. Test existing target with PDB file returns 200 and PDB media_type
+        resp = client.get(f"/api/v1/targets/{t.id}/pdb")
+        assert resp.status_code == 200
+        assert "ATOM" in resp.text
+        assert resp.headers["content-type"].startswith("chemical/x-pdb")
+
+        # 2. Test non-existent target returns 404
+        resp_404 = client.get("/api/v1/targets/999999/pdb")
+        assert resp_404.status_code == 404
+
+        # Clean up
+        db.delete(t)
+        db.delete(p)
+        db.commit()
+        if os.path.exists(pdb_file_path):
+            os.remove(pdb_file_path)
+    finally:
+        db.close()
 

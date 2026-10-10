@@ -38,6 +38,8 @@ export interface TargetProtein {
   id: number;
   name: string;
   uniprot_id: string;
+  alphafold_id?: string;
+  pdb_id?: string;
   weed_sequence: string;
   crop_sequence: string;
   essentiality_score: number;

@@ -2,7 +2,7 @@ import datetime
 import os
 import json
 from typing import List, Optional, Dict, Any
-from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
@@ -226,6 +226,36 @@ def get_project_targets(
         raise HTTPException(status_code=404, detail="Project not found")
     verify_project_ownership(proj, current_user)
     return db.query(TargetProtein).filter_by(project_id=project_id).all()
+
+@app.get("/api/v1/targets/{target_id}/pdb")
+def get_target_pdb(
+    target_id: int,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    target = db.query(TargetProtein).filter_by(id=target_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Target protein not found")
+    if target.project:
+        verify_project_ownership(target.project, current_user)
+
+    pdb_path = target.pdb_id
+    if pdb_path and os.path.exists(pdb_path):
+        with open(pdb_path, "r") as f:
+            content = f.read()
+        return Response(content=content, media_type="chemical/x-pdb")
+
+    if target.uniprot_id:
+        try:
+            fetched_path = protein_engine.fetch_alphafold_structure(target.uniprot_id)
+            if fetched_path and os.path.exists(fetched_path):
+                with open(fetched_path, "r") as f:
+                    content = f.read()
+                return Response(content=content, media_type="chemical/x-pdb")
+        except Exception:
+            pass
+
+    raise HTTPException(status_code=404, detail="3D PDB structure file not available for this target")
 
 # ---------------- Molecular Generation Endpoints ----------------
 
