@@ -851,7 +851,13 @@ export default function App() {
                           ))}
                         </div>
                       </div>
-                      <ProteinViewer3D pdbId="1YI2" height="230px" styleMode={viewerStyle} />
+                      <ProteinViewer3D
+                        targetId={targets.find(t => t.name === selectedCandidate.target_name)?.id}
+                        uniprotId={targets.find(t => t.name === selectedCandidate.target_name)?.uniprot_id}
+                        pdbId={targets.find(t => t.name === selectedCandidate.target_name)?.alphafold_id || "1YI2"}
+                        height="230px"
+                        styleMode={viewerStyle}
+                      />
                     </div>
 
                     <div className="space-y-2.5 text-xs bg-slate-950/80 p-4 rounded-xl border border-slate-800/90 flex flex-col justify-between">
@@ -993,7 +999,13 @@ export default function App() {
                         ))}
                       </div>
                     </div>
-                    <ProteinViewer3D pdbId="1YI2" height="340px" styleMode={viewerStyle} />
+                    <ProteinViewer3D
+                      targetId={selectedTarget.id}
+                      uniprotId={selectedTarget.uniprot_id}
+                      pdbId={selectedTarget.alphafold_id || "1YI2"}
+                      height="340px"
+                      styleMode={viewerStyle}
+                    />
                     
                     <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs font-mono space-y-2">
                       <div className="text-slate-400 font-sans font-bold">Weed Target Sequence Fragment:</div>
