@@ -851,29 +851,39 @@ export default function App() {
                           ))}
                         </div>
                       </div>
-                      <ProteinViewer3D pdbId="1YI2" height="230px" styleMode={viewerStyle} />
+                      <ProteinViewer3D targetId={selectedTarget?.id} uniprotId={selectedTarget?.uniprot_id} pdbId="1YI2" height="230px" styleMode={viewerStyle} />
                     </div>
 
                     <div className="space-y-2.5 text-xs bg-slate-950/80 p-4 rounded-xl border border-slate-800/90 flex flex-col justify-between">
                       <div className="space-y-2">
                         <h4 className="font-bold text-slate-200 text-xs border-b border-slate-800 pb-1.5 flex items-center justify-between">
                           <span>AI Predictive Screening Scores</span>
-                          <span className="text-[10px] text-emerald-400 font-mono">Consensus Verified</span>
+                          <span className="text-[10px] text-emerald-400 font-mono">Consensus Engine</span>
                         </h4>
                         
                         <div className="flex justify-between items-center py-1 border-b border-slate-900">
-                          <span className="text-slate-400">Boltz-2 Predicted pKd:</span>
-                          <strong className="text-emerald-400 font-bold text-sm font-mono">{selectedCandidate.boltz_affinity_score ?? "9.35"}</strong>
+                          <span className="text-slate-400">Boltz-2 Predicted pIC50:</span>
+                          <strong className="text-emerald-400 font-bold text-sm font-mono">
+                            {selectedCandidate.boltz_affinity_score != null
+                              ? selectedCandidate.boltz_affinity_score
+                              : (selectedCandidate.boltz_status === "NOT_INSTALLED" ? "● NOT INSTALLED" : (selectedCandidate.boltz_status || "N/A"))}
+                          </strong>
                         </div>
 
                         <div className="flex justify-between items-center py-1 border-b border-slate-900">
                           <span className="text-slate-400">Complex Confidence (pLDDT):</span>
-                          <strong className="text-slate-200 font-bold font-mono">{selectedCandidate.boltz_confidence ?? "89.4"}%</strong>
+                          <strong className="text-slate-200 font-bold font-mono">
+                            {selectedCandidate.boltz_confidence != null ? `${selectedCandidate.boltz_confidence}%` : "N/A"}
+                          </strong>
                         </div>
 
                         <div className="flex justify-between items-center py-1 border-b border-slate-900">
                           <span className="text-slate-400">GNINA CNN Affinity:</span>
-                          <strong className="text-teal-400 font-bold font-mono">{selectedCandidate.gnina_docking_score ?? "-10.8"} kcal/mol</strong>
+                          <strong className="text-teal-400 font-bold font-mono">
+                            {selectedCandidate.gnina_docking_score != null
+                              ? `${selectedCandidate.gnina_docking_score} kcal/mol`
+                              : (selectedCandidate.gnina_status === "NOT_INSTALLED" ? "● NOT INSTALLED" : (selectedCandidate.gnina_status || "N/A"))}
+                          </strong>
                         </div>
 
                         <div className="flex justify-between items-center py-1 border-b border-slate-900">
@@ -993,7 +1003,7 @@ export default function App() {
                         ))}
                       </div>
                     </div>
-                    <ProteinViewer3D pdbId="1YI2" height="340px" styleMode={viewerStyle} />
+                    <ProteinViewer3D targetId={selectedTarget.id} uniprotId={selectedTarget.uniprot_id} pdbId="1YI2" height="340px" styleMode={viewerStyle} />
                     
                     <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs font-mono space-y-2">
                       <div className="text-slate-400 font-sans font-bold">Weed Target Sequence Fragment:</div>

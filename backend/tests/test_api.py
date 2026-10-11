@@ -250,6 +250,49 @@ def test_unauthenticated_access_to_protected_endpoints(monkeypatch):
     assert client.get("/api/v1/agent/tools").status_code == 401
 
 
+def test_get_target_pdb_endpoint():
+    """Verify target PDB structure retrieval endpoint returns 200 with PDB content."""
+    from app.db.database import SessionLocal
+    from app.models.models import Project, TargetProtein
+
+    db = SessionLocal()
+    try:
+        p = Project(
+            name="Target PDB Endpoint Test Project",
+            weed_species="Palmer Amaranth",
+            crop_species="Soybean",
+            objective="new_herbicide"
+        )
+        db.add(p)
+        db.commit()
+        db.refresh(p)
+
+        target = TargetProtein(
+            project_id=p.id,
+            name="Palmer Amaranth ALS Target",
+            gene="ALS",
+            uniprot_id="P10324",
+            pdb_id="./data/structures/AF-P10324-F1-model_v4.pdb"
+        )
+        db.add(target)
+        db.commit()
+        db.refresh(target)
+
+        resp = client.get(f"/api/v1/targets/{target.id}/pdb")
+        assert resp.status_code == 200
+        assert "ATOM" in resp.text or "HEADER" in resp.text or len(resp.text) > 50
+
+        # Non-existent target ID
+        resp_404 = client.get("/api/v1/targets/999999/pdb")
+        assert resp_404.status_code == 404
+
+        db.delete(target)
+        db.delete(p)
+        db.commit()
+    finally:
+        db.close()
+
+
 def test_configurable_downstream_target_count():
     """Verify that projects can configure downstream_target_count (Top 1, 3, 5, etc)."""
     payload = {

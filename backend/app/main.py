@@ -2,7 +2,7 @@ import datetime
 import os
 import json
 from typing import List, Optional, Dict, Any
-from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
@@ -226,6 +226,40 @@ def get_project_targets(
         raise HTTPException(status_code=404, detail="Project not found")
     verify_project_ownership(proj, current_user)
     return db.query(TargetProtein).filter_by(project_id=project_id).all()
+
+@app.get("/api/v1/targets/{target_id}/pdb")
+def get_target_pdb(
+    target_id: int,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    target = db.query(TargetProtein).filter_by(id=target_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Target protein not found")
+
+    if target.project:
+        verify_project_ownership(target.project, current_user)
+
+    # 1. Check if target has a cached local PDB file
+    pdb_path = target.pdb_id
+    if pdb_path and os.path.exists(pdb_path) and os.path.getsize(pdb_path) > 100:
+        with open(pdb_path, "r") as f:
+            pdb_content = f.read()
+        return Response(content=pdb_content, media_type="text/plain")
+
+    # 2. Fetch via UniProt accession if available
+    uniprot_acc = target.uniprot_id
+    if uniprot_acc:
+        try:
+            fetched_pdb_path = protein_engine.fetch_alphafold_structure(uniprot_acc)
+            if os.path.exists(fetched_pdb_path):
+                with open(fetched_pdb_path, "r") as f:
+                    pdb_content = f.read()
+                return Response(content=pdb_content, media_type="text/plain")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to retrieve 3D structure for UniProt ID {uniprot_acc}: {str(e)}")
+
+    raise HTTPException(status_code=404, detail="3D PDB structure file unavailable for this target.")
 
 # ---------------- Molecular Generation Endpoints ----------------
 
