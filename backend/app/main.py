@@ -227,6 +227,32 @@ def get_project_targets(
     verify_project_ownership(proj, current_user)
     return db.query(TargetProtein).filter_by(project_id=project_id).all()
 
+@app.get("/api/v1/targets/{target_id}/pdb")
+def get_target_pdb(
+    target_id: int,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    from fastapi.responses import FileResponse
+    target = db.query(TargetProtein).filter_by(id=target_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Target protein not found")
+    if target.project:
+        verify_project_ownership(target.project, current_user)
+
+    if target.pdb_id and os.path.exists(target.pdb_id):
+        return FileResponse(target.pdb_id, media_type="text/plain", filename=os.path.basename(target.pdb_id))
+
+    if target.uniprot_id:
+        try:
+            af_path = protein_engine.fetch_alphafold_structure(target.uniprot_id)
+            if os.path.exists(af_path):
+                return FileResponse(af_path, media_type="text/plain", filename=os.path.basename(af_path))
+        except Exception:
+            pass
+
+    raise HTTPException(status_code=404, detail="PDB structure file not available for this target")
+
 # ---------------- Molecular Generation Endpoints ----------------
 
 @app.post("/api/v1/projects/{project_id}/molecular-generation/runs", response_model=MolecularGenerationRunResponse)
