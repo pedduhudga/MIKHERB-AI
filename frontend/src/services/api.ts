@@ -56,6 +56,21 @@ export const api = {
     return fallbackHardware.engines;
   },
 
+  validateEngines: async () => {
+    try {
+      const headers = await getAuthHeaders(false);
+      const res = await fetch(`${API_BASE_URL}/api/v1/system/engines/validate`, {
+        method: 'POST',
+        headers,
+        signal: AbortSignal.timeout(10000)
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.warn("Backend validate engines endpoint unreachable, using fallback status:", e);
+    }
+    return fallbackHardware.engines;
+  },
+
   getProjects: async () => {
     try {
       const headers = await getAuthHeaders(false);
