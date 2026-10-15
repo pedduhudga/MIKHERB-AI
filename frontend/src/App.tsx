@@ -39,6 +39,11 @@ export default function App() {
   const [copiedSmiles, setCopiedSmiles] = useState<string | null>(null);
   const [viewerStyle, setViewerStyle] = useState<'cartoon' | 'stick' | 'sphere'>('cartoon');
 
+  // Scientific Engine Manager Modal
+  const [showEngineModal, setShowEngineModal] = useState<boolean>(false);
+  const [enginesStatus, setEnginesStatus] = useState<Record<string, any>>({});
+  const [validatingEngines, setValidatingEngines] = useState<boolean>(false);
+
   // Discovery Project Wizard
   const [newProjName, setNewProjName] = useState('Palmer Amaranth Target-ALS Discovery');
   const [newWeed, setNewWeed] = useState('Palmer Amaranth (Amaranthus palmeri)');
@@ -117,6 +122,7 @@ export default function App() {
 
   useEffect(() => {
     fetchHardware();
+    fetchEngines();
     fetchProjects();
   }, []);
 
@@ -126,6 +132,30 @@ export default function App() {
       setHardware(data);
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const fetchEngines = async () => {
+    try {
+      const data = await api.getEngines();
+      setEnginesStatus(data);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleValidateEngines = async () => {
+    try {
+      setValidatingEngines(true);
+      showToast("Running scientific engine diagnostic validation...");
+      const res = await api.validateEngines();
+      setEnginesStatus(res);
+      showToast("Engine status diagnostic updated successfully!");
+    } catch (e: any) {
+      console.error(e);
+      showToast(`Engine validation error: ${e.message}`);
+    } finally {
+      setValidatingEngines(false);
     }
   };
 
@@ -452,10 +482,14 @@ export default function App() {
               <span className="text-slate-400">GPU: <strong className="text-emerald-400 font-semibold">{hardware?.gpu?.name?.split('(')[0] || "RTX 4090"}</strong></span>
             </div>
             <div className="h-3 w-px bg-slate-800" />
-            <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => { fetchEngines(); setShowEngineModal(true); }}
+              className="flex items-center gap-1.5 hover:bg-slate-900 px-2 py-0.5 rounded-lg transition"
+              title="Click to view Scientific Engine Manager & Diagnostics"
+            >
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-sm shadow-emerald-400" />
-              <span className="text-emerald-400 font-bold text-[11px]">BioEngines Live</span>
-            </div>
+              <span className="text-emerald-400 font-bold text-[11px] underline underline-offset-2">BioEngines Manager</span>
+            </button>
           </div>
           <FirebaseAuthButton />
         </div>
@@ -1611,6 +1645,106 @@ export default function App() {
         )}
 
       </main>
+
+      {/* Scientific Engine Manager Modal */}
+      {showEngineModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-3xl p-6 space-y-5 shadow-2xl shadow-black/80 relative max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-400 border border-emerald-500/20">
+                  <Atom className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-white font-heading">Scientific Engine Status & Adapter Manager</h3>
+                  <p className="text-[11px] text-slate-400">Live system diagnostics for binaries, python libraries, APIs, and execution modes.</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowEngineModal(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 space-y-3 pr-1 text-xs">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {Object.keys(enginesStatus).length > 0 ? (
+                  Object.entries(enginesStatus).map(([key, info]: [string, any]) => {
+                    const name = typeof info === 'object' ? (info.name || key) : key;
+                    const probeStatus = typeof info === 'object' ? (info.probe_status || info.status || "UNKNOWN") : "READY";
+                    const sciStatus = typeof info === 'object' ? (info.scientific_status || "UNTESTED") : "READY";
+                    const isBinary = typeof info === 'object' ? info.is_binary : false;
+                    const isApi = typeof info === 'object' ? info.is_api : false;
+                    const isPyLib = typeof info === 'object' ? info.is_python_lib : false;
+
+                    const isReady = probeStatus === "READY" || probeStatus === "COMPLETED";
+
+                    return (
+                      <div key={key} className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 flex flex-col justify-between space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <strong className="text-slate-200 text-xs font-bold">{name}</strong>
+                            <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                              {isBinary ? `Binary: ${info.binary_name}` : isApi ? "External REST API" : isPyLib ? "Python Module" : "Adapter Engine"}
+                            </div>
+                          </div>
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-bold ${
+                            isReady
+                              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                              : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                          }`}>
+                            {isReady ? "READY" : "SURROGATE / NOT INSTALLED"}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 text-[10px] font-mono bg-slate-900/60 p-2 rounded-lg border border-slate-800/80">
+                          <div>
+                            <span className="text-slate-500 block">CLI Probe:</span>
+                            <span className={isReady ? 'text-emerald-400 font-bold' : 'text-slate-400'}>{probeStatus}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500 block">Scientific Validation:</span>
+                            <span className={sciStatus === 'VALIDATED' ? 'text-emerald-400 font-bold' : sciStatus === 'UNTESTED' ? 'text-slate-400' : 'text-amber-400'}>
+                              {sciStatus}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="col-span-2 p-8 text-center text-slate-500 text-xs">
+                    Loading engine status definitions...
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between border-t border-slate-800 pt-3">
+              <span className="text-[11px] text-slate-400">
+                Local-first architecture falls back cleanly to RDKit surrogate 3D conformer scoring when binaries are absent.
+              </span>
+              <button
+                onClick={handleValidateEngines}
+                disabled={validatingEngines}
+                className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-bold rounded-xl transition text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-500/20"
+              >
+                {validatingEngines ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Running Diagnostics...
+                  </>
+                ) : (
+                  <>
+                    <Activity className="w-3.5 h-3.5" /> Run System Diagnostic
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Register New Active Ingredient Modal */}
       {showAddIngredientModal && (
