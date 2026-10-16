@@ -39,6 +39,39 @@ export default function App() {
   const [copiedSmiles, setCopiedSmiles] = useState<string | null>(null);
   const [viewerStyle, setViewerStyle] = useState<'cartoon' | 'stick' | 'sphere'>('cartoon');
 
+  // Scientific Engine Status Manager Modal
+  const [showEngineManagerModal, setShowEngineManagerModal] = useState(false);
+  const [engineStatuses, setEngineStatuses] = useState<Record<string, any>>({});
+  const [validatingEngines, setValidatingEngines] = useState(false);
+
+  const fetchEngineStatuses = async () => {
+    try {
+      const data = await api.getEngines();
+      if (data && typeof data === 'object') {
+        setEngineStatuses(data);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleValidateEngines = async () => {
+    try {
+      setValidatingEngines(true);
+      showToast("Running scientific engine CLI probe & validation diagnostic...");
+      const data = await api.validateEngines();
+      if (data) {
+        setEngineStatuses(data);
+        showToast("Bio-engine validation diagnostic complete!");
+      }
+    } catch (e: any) {
+      console.error(e);
+      showToast(`Engine validation error: ${e.message}`);
+    } finally {
+      setValidatingEngines(false);
+    }
+  };
+
   // Discovery Project Wizard
   const [newProjName, setNewProjName] = useState('Palmer Amaranth Target-ALS Discovery');
   const [newWeed, setNewWeed] = useState('Palmer Amaranth (Amaranthus palmeri)');
@@ -452,10 +485,17 @@ export default function App() {
               <span className="text-slate-400">GPU: <strong className="text-emerald-400 font-semibold">{hardware?.gpu?.name?.split('(')[0] || "RTX 4090"}</strong></span>
             </div>
             <div className="h-3 w-px bg-slate-800" />
-            <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => {
+                fetchEngineStatuses();
+                setShowEngineManagerModal(true);
+              }}
+              className="flex items-center gap-1.5 hover:bg-slate-900 px-2 py-1 rounded-lg transition cursor-pointer border border-emerald-500/20"
+              title="Open Scientific Engine Status Manager"
+            >
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-sm shadow-emerald-400" />
               <span className="text-emerald-400 font-bold text-[11px]">BioEngines Live</span>
-            </div>
+            </button>
           </div>
           <FirebaseAuthButton />
         </div>
@@ -851,7 +891,7 @@ export default function App() {
                           ))}
                         </div>
                       </div>
-                      <ProteinViewer3D pdbId="1YI2" height="230px" styleMode={viewerStyle} />
+                      <ProteinViewer3D targetId={selectedTarget?.id} uniprotId={selectedTarget?.uniprot_id} pdbId="1YI2" height="230px" styleMode={viewerStyle} />
                     </div>
 
                     <div className="space-y-2.5 text-xs bg-slate-950/80 p-4 rounded-xl border border-slate-800/90 flex flex-col justify-between">
@@ -863,29 +903,37 @@ export default function App() {
                         
                         <div className="flex justify-between items-center py-1 border-b border-slate-900">
                           <span className="text-slate-400">Boltz-2 Predicted pKd:</span>
-                          <strong className="text-emerald-400 font-bold text-sm font-mono">{selectedCandidate.boltz_affinity_score ?? "9.35"}</strong>
+                          <strong className="text-emerald-400 font-bold text-sm font-mono">
+                            {selectedCandidate.boltz_affinity_score != null ? selectedCandidate.boltz_affinity_score : (selectedCandidate.boltz_status === 'NOT_INSTALLED' ? 'NOT INSTALLED' : (selectedCandidate.boltz_status || 'NOT AVAILABLE'))}
+                          </strong>
                         </div>
 
                         <div className="flex justify-between items-center py-1 border-b border-slate-900">
                           <span className="text-slate-400">Complex Confidence (pLDDT):</span>
-                          <strong className="text-slate-200 font-bold font-mono">{selectedCandidate.boltz_confidence ?? "89.4"}%</strong>
+                          <strong className="text-slate-200 font-bold font-mono">
+                            {selectedCandidate.boltz_confidence != null ? `${selectedCandidate.boltz_confidence}%` : (selectedCandidate.boltz_status === 'NOT_INSTALLED' ? 'NOT INSTALLED' : (selectedCandidate.boltz_status || 'NOT AVAILABLE'))}
+                          </strong>
                         </div>
 
                         <div className="flex justify-between items-center py-1 border-b border-slate-900">
                           <span className="text-slate-400">GNINA CNN Affinity:</span>
-                          <strong className="text-teal-400 font-bold font-mono">{selectedCandidate.gnina_docking_score ?? "-10.8"} kcal/mol</strong>
+                          <strong className="text-teal-400 font-bold font-mono">
+                            {selectedCandidate.gnina_docking_score != null ? `${selectedCandidate.gnina_docking_score} kcal/mol` : (selectedCandidate.gnina_status === 'NOT_INSTALLED' ? 'NOT INSTALLED' : (selectedCandidate.gnina_status || 'NOT AVAILABLE'))}
+                          </strong>
                         </div>
 
                         <div className="flex justify-between items-center py-1 border-b border-slate-900">
                           <span className="text-slate-400">Pose Agreement:</span>
                           <span className="px-2 py-0.5 rounded text-[11px] font-mono border text-emerald-400 bg-emerald-950/40 border-emerald-800/50">
-                            {selectedCandidate.pose_agreement || "MULTI_MODEL_COMPLETED"}
+                            {selectedCandidate.pose_agreement || "NOT_AVAILABLE"}
                           </span>
                         </div>
 
                         <div className="flex justify-between items-center py-1">
                           <span className="text-slate-400">Crop Selectivity Index:</span>
-                          <strong className="text-emerald-400 font-bold text-sm font-mono">{selectedCandidate.crop_selectivity_score ?? 94}/100</strong>
+                          <strong className="text-emerald-400 font-bold text-sm font-mono">
+                            {selectedCandidate.crop_selectivity_score != null ? `${selectedCandidate.crop_selectivity_score}/100` : 'NOT AVAILABLE'}
+                          </strong>
                         </div>
                       </div>
 
@@ -993,7 +1041,7 @@ export default function App() {
                         ))}
                       </div>
                     </div>
-                    <ProteinViewer3D pdbId="1YI2" height="340px" styleMode={viewerStyle} />
+                    <ProteinViewer3D targetId={selectedTarget.id} uniprotId={selectedTarget.uniprot_id} pdbId="1YI2" height="340px" styleMode={viewerStyle} />
                     
                     <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs font-mono space-y-2">
                       <div className="text-slate-400 font-sans font-bold">Weed Target Sequence Fragment:</div>
@@ -1755,6 +1803,88 @@ export default function App() {
         </div>
       )}
 
+      {/* Scientific Engine Status Manager Modal */}
+      {showEngineManagerModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-3xl p-6 space-y-5 shadow-2xl shadow-black/80 relative max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-400 border border-emerald-500/20">
+                  <Activity className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-white font-heading">Scientific Engine Status Manager</h3>
+                  <p className="text-[11px] text-slate-400">Live CLI execution probes and scientific validation across all bio-engines.</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowEngineManagerModal(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs">
+              <span className="text-slate-400">Environment Diagnostic: Check CLI binaries, Python modules & REST APIs</span>
+              <button
+                onClick={handleValidateEngines}
+                disabled={validatingEngines}
+                className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:from-slate-800 disabled:to-slate-800 text-slate-950 font-bold px-3.5 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition shadow-md shadow-emerald-500/20"
+              >
+                {validatingEngines ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5 fill-slate-950" />}
+                {validatingEngines ? 'Testing Engines...' : 'Run Engine Diagnostic'}
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 space-y-2 pr-1">
+              {Object.keys(engineStatuses).length > 0 ? (
+                Object.entries(engineStatuses).map(([key, info]: [string, any]) => {
+                  const name = info?.name || key;
+                  const status = typeof info === 'string' ? info : (info?.status || 'UNKNOWN');
+                  const sciPass = typeof info === 'object' ? info?.scientific_passed : status.includes('SCIENTIFICALLY_VALIDATED');
+                  const isInstalled = typeof info === 'object' ? info?.installed : status.includes('READY') || status.includes('VALIDATED');
+
+                  return (
+                    <div key={key} className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between text-xs">
+                      <div className="space-y-0.5">
+                        <div className="font-bold text-slate-200 flex items-center gap-2">
+                          <span>{name}</span>
+                          <span className="font-mono text-[10px] text-slate-500 font-normal">({key})</span>
+                        </div>
+                        <div className="text-[11px] text-slate-400 font-mono">
+                          {typeof info === 'object' ? (info?.version || info?.executable_path || info?.module_name || 'System Module') : 'System Adapter'}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 font-mono text-[11px]">
+                        <span className={`px-2.5 py-1 rounded font-bold border ${
+                          isInstalled
+                            ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                            : 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                        }`}>
+                          {isInstalled ? 'READY / INSTALLED' : 'NOT INSTALLED'}
+                        </span>
+                        {typeof info === 'object' && info?.scientific_passed !== undefined && (
+                          <span className={`px-2.5 py-1 rounded font-bold border ${
+                            sciPass ? 'bg-teal-500/20 text-teal-300 border-teal-500/30' : 'bg-slate-800 text-slate-400 border-slate-700'
+                          }`}>
+                            {sciPass ? 'SCIENTIFICALLY VALIDATED' : 'NOT VALIDATED'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="text-center py-8 text-slate-500 text-xs">
+                  Click &quot;Run Engine Diagnostic&quot; to probe local CLI binaries, RDKit, P2Rank, GNINA, Boltz-2, and REST APIs.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
