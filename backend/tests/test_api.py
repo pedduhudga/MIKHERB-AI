@@ -250,6 +250,52 @@ def test_unauthenticated_access_to_protected_endpoints(monkeypatch):
     assert client.get("/api/v1/agent/tools").status_code == 401
 
 
+def test_get_target_pdb_endpoint():
+    """Verify raw PDB content retrieval endpoint for target proteins."""
+    from app.db.database import SessionLocal
+    from app.models.models import Project, TargetProtein
+    import os
+
+    db = SessionLocal()
+    try:
+        proj = Project(
+            name="PDB Endpoint Test Project",
+            weed_species="Palmer Amaranth",
+            crop_species="Soybean",
+            objective="new_herbicide"
+        )
+        db.add(proj)
+        db.commit()
+        db.refresh(proj)
+
+        # Create dummy PDB file
+        os.makedirs("./data/structures", exist_ok=True)
+        dummy_pdb_path = "./data/structures/test_dummy_target.pdb"
+        with open(dummy_pdb_path, "w") as f:
+            f.write("HEADER    TEST PDB FILE\nATOM      1  CA  ALA A   1      10.000  10.000  10.000  1.00 20.00           C\nEND\n")
+
+        target = TargetProtein(
+            project_id=proj.id,
+            name="Palmer Amaranth ALS",
+            uniprot_id="P10324",
+            pdb_id=dummy_pdb_path
+        )
+        db.add(target)
+        db.commit()
+        db.refresh(target)
+
+        resp = client.get(f"/api/v1/targets/{target.id}/pdb")
+        assert resp.status_code == 200
+        assert "HEADER    TEST PDB FILE" in resp.text
+
+        # Test non-existent target ID
+        resp_404 = client.get("/api/v1/targets/99999/pdb")
+        assert resp_404.status_code == 404
+    finally:
+        if os.path.exists("./data/structures/test_dummy_target.pdb"):
+            os.remove("./data/structures/test_dummy_target.pdb")
+        db.close()
+
 def test_configurable_downstream_target_count():
     """Verify that projects can configure downstream_target_count (Top 1, 3, 5, etc)."""
     payload = {
