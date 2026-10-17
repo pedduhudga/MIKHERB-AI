@@ -328,4 +328,42 @@ def test_strict_project_ownership_no_null_exposure():
     db.close()
 
 
+def test_get_target_pdb_endpoint(tmp_path):
+    """Verify /api/v1/targets/{target_id}/pdb returns PDB file content or 404 cleanly."""
+    from app.db.database import SessionLocal
+    from app.models.models import Project, TargetProtein
+
+    db = SessionLocal()
+    try:
+        pdb_file = str(tmp_path / "test_target.pdb")
+        with open(pdb_file, "w") as f:
+            f.write("HEADER    TEST TARGET STRUCTURE\nATOM      1  CA  MET A   1      10.000  10.000  10.000  1.00 90.00           C\nEND\n")
+
+        proj = Project(name="PDB Endpoint Test Project", weed_species="Palmer Amaranth", crop_species="Soybean", objective="new_herbicide")
+        db.add(proj)
+        db.commit()
+        db.refresh(proj)
+
+        target = TargetProtein(
+            project_id=proj.id,
+            name="Palmer Amaranth ALS Target",
+            gene="ALS",
+            target_family="ALS / AHAS",
+            uniprot_id="P10324",
+            pdb_id=pdb_file
+        )
+        db.add(target)
+        db.commit()
+        db.refresh(target)
+
+        resp = client.get(f"/api/v1/targets/{target.id}/pdb")
+        assert resp.status_code == 200
+        assert "TEST TARGET STRUCTURE" in resp.text
+        assert resp.headers["content-type"].startswith("chemical/x-pdb")
+
+        # 404 for invalid target
+        resp_404 = client.get("/api/v1/targets/999999/pdb")
+        assert resp_404.status_code == 404
+    finally:
+        db.close()
 

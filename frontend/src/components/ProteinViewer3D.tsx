@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 
 interface ViewerProps {
   pdbId?: string;
+  targetId?: number;
+  uniprotId?: string;
   height?: string;
   styleMode?: 'cartoon' | 'stick' | 'sphere';
 }
@@ -34,10 +36,10 @@ TER      23      TYR A   5
 END                                                                             
 `;
 
-export const ProteinViewer3D: React.FC<ViewerProps> = ({ pdbId = "1YI2", height = "350px", styleMode = "cartoon" }) => {
+export const ProteinViewer3D: React.FC<ViewerProps> = ({ pdbId = "1YI2", targetId, uniprotId, height = "350px", styleMode = "cartoon" }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
-  const [source, setSource] = useState<string>("RCSB PDB");
+  const [source, setSource] = useState<string>("Target Structure");
 
   useEffect(() => {
     let isMounted = true;
@@ -65,23 +67,72 @@ export const ProteinViewer3D: React.FC<ViewerProps> = ({ pdbId = "1YI2", height 
       };
 
       setLoading(true);
-      fetch(`https://files.rcsb.org/download/${pdbId}.pdb`, { signal: AbortSignal.timeout(3500) })
-        .then(res => {
-          if (!res.ok) throw new Error("RCSB fetch status: " + res.status);
-          return res.text();
-        })
-        .then(data => {
-          renderData(data, `RCSB PDB: ${pdbId}`);
-        })
-        .catch(() => {
-          renderData(MINIMAL_PDB, `AlphaFold Synthetic Cache (${pdbId})`);
-        });
+
+      const fetchByTargetId = async () => {
+        if (targetId) {
+          try {
+            const res = await fetch(`/api/v1/targets/${targetId}/pdb`, { signal: AbortSignal.timeout(3500) });
+            if (res.ok) {
+              const text = await res.text();
+              if (text && text.includes("ATOM")) {
+                renderData(text, `Target Protein #${targetId}`);
+                return true;
+              }
+            }
+          } catch (e) {
+            // fall through to UniProt / RCSB fallback
+          }
+        }
+        return false;
+      };
+
+      const fetchByUniprotId = async () => {
+        if (uniprotId) {
+          try {
+            const res = await fetch(`https://alphafold.ebi.ac.uk/files/AF-${uniprotId.toUpperCase()}-F1-model_v4.pdb`, { signal: AbortSignal.timeout(3500) });
+            if (res.ok) {
+              const text = await res.text();
+              if (text && text.includes("ATOM")) {
+                renderData(text, `AlphaFold DB: ${uniprotId}`);
+                return true;
+              }
+            }
+          } catch (e) {
+            // fall through to RCSB fallback
+          }
+        }
+        return false;
+      };
+
+      const fetchRcsbFallback = () => {
+        fetch(`https://files.rcsb.org/download/${pdbId}.pdb`, { signal: AbortSignal.timeout(3500) })
+          .then(res => {
+            if (!res.ok) throw new Error("RCSB fetch status: " + res.status);
+            return res.text();
+          })
+          .then(data => {
+            renderData(data, `RCSB PDB: ${pdbId}`);
+          })
+          .catch(() => {
+            renderData(MINIMAL_PDB, `Synthetic Backbone (${pdbId})`);
+          });
+      };
+
+      (async () => {
+        const loadedFromTarget = await fetchByTargetId();
+        if (loadedFromTarget) return;
+
+        const loadedFromUniprot = await fetchByUniprotId();
+        if (loadedFromUniprot) return;
+
+        fetchRcsbFallback();
+      })();
     }
 
     return () => {
       isMounted = false;
     };
-  }, [pdbId, styleMode]);
+  }, [targetId, uniprotId, pdbId, styleMode]);
 
   return (
     <div className="relative rounded-lg overflow-hidden border border-slate-800 bg-slate-950">

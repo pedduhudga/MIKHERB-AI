@@ -2,7 +2,7 @@ import datetime
 import os
 import json
 from typing import List, Optional, Dict, Any
-from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
@@ -226,6 +226,35 @@ def get_project_targets(
         raise HTTPException(status_code=404, detail="Project not found")
     verify_project_ownership(proj, current_user)
     return db.query(TargetProtein).filter_by(project_id=project_id).all()
+
+@app.get("/api/v1/targets/{target_id}/pdb")
+def get_target_pdb(
+    target_id: int,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    target = db.query(TargetProtein).filter_by(id=target_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Target not found")
+    if target.project:
+        verify_project_ownership(target.project, current_user)
+
+    if target.pdb_id and os.path.exists(target.pdb_id):
+        with open(target.pdb_id, "r") as f:
+            pdb_content = f.read()
+        return Response(content=pdb_content, media_type="chemical/x-pdb")
+
+    if target.uniprot_id:
+        try:
+            pdb_path = protein_engine.fetch_alphafold_structure(target.uniprot_id)
+            if pdb_path and os.path.exists(pdb_path):
+                with open(pdb_path, "r") as f:
+                    pdb_content = f.read()
+                return Response(content=pdb_content, media_type="chemical/x-pdb")
+        except Exception:
+            pass
+
+    raise HTTPException(status_code=404, detail="PDB structure content unavailable for this target")
 
 # ---------------- Molecular Generation Endpoints ----------------
 
