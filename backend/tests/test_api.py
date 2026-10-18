@@ -328,4 +328,38 @@ def test_strict_project_ownership_no_null_exposure():
     db.close()
 
 
+def test_get_target_pdb_endpoint(tmp_path):
+    """Verify GET /api/v1/targets/{target_id}/pdb returns raw PDB content."""
+    from app.db.database import SessionLocal
+    from app.models.models import Project, TargetProtein
+    db = SessionLocal()
+    p = Project(name="Test Target PDB Project", researcher="Test Scientist", weed_species="Palmer amaranth", crop_species="Soybean", objective="Test PDB")
+    db.add(p)
+    db.commit()
+    db.refresh(p)
+
+    dummy_pdb_file = tmp_path / "test_structure.pdb"
+    dummy_pdb_file.write_text("HEADER    TEST STRUCTURE\nATOM      1  CA  ALA A   1      10.000  10.000  10.000  1.00 80.00           C\nEND\n")
+
+    t = TargetProtein(
+        project_id=p.id,
+        name="Palmer amaranth ALS Target",
+        gene="ALS",
+        uniprot_id="A0A890DLI3",
+        pdb_id=str(dummy_pdb_file)
+    )
+    db.add(t)
+    db.commit()
+    db.refresh(t)
+
+    resp = client.get(f"/api/v1/targets/{t.id}/pdb")
+    assert resp.status_code == 200
+    assert "HEADER    TEST STRUCTURE" in resp.text
+    assert "ATOM      1  CA" in resp.text
+
+    # Cleanup
+    db.delete(t)
+    db.delete(p)
+    db.commit()
+    db.close()
 

@@ -19,6 +19,8 @@ export interface Project {
 export interface Candidate {
   id: number;
   project_id: number;
+  target_id?: number;
+  uniprot_id?: string;
   compound_code: string;
   smiles: string;
   target_name: string;

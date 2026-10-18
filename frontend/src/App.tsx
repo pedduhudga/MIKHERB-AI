@@ -799,7 +799,7 @@ export default function App() {
                     <div className="flex items-center gap-4">
                       <div className="text-right">
                         <div className="text-3xl font-black text-emerald-400 font-heading">
-                          {selectedCandidate.mikherb_score != null ? `${selectedCandidate.mikherb_score}` : "95.8"}
+                          {selectedCandidate.mikherb_score != null ? `${selectedCandidate.mikherb_score}` : "N/A"}
                           <span className="text-xs text-slate-400 font-normal">/100</span>
                         </div>
                         <span className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">MikHerb Score</span>
@@ -838,7 +838,7 @@ export default function App() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <div className="flex items-center justify-between text-xs text-slate-400">
-                        <span className="font-semibold text-slate-300">ALS Target Binding Cavity 3D</span>
+                        <span className="font-semibold text-slate-300">Target Binding Cavity 3D</span>
                         <div className="flex gap-1.5 text-[11px]">
                           {(['cartoon', 'stick', 'sphere'] as const).map(mode => (
                             <button
@@ -851,7 +851,7 @@ export default function App() {
                           ))}
                         </div>
                       </div>
-                      <ProteinViewer3D pdbId="1YI2" height="230px" styleMode={viewerStyle} />
+                      <ProteinViewer3D targetId={selectedCandidate.target_id} uniprotId={selectedCandidate.uniprot_id} height="230px" styleMode={viewerStyle} />
                     </div>
 
                     <div className="space-y-2.5 text-xs bg-slate-950/80 p-4 rounded-xl border border-slate-800/90 flex flex-col justify-between">
@@ -863,29 +863,49 @@ export default function App() {
                         
                         <div className="flex justify-between items-center py-1 border-b border-slate-900">
                           <span className="text-slate-400">Boltz-2 Predicted pKd:</span>
-                          <strong className="text-emerald-400 font-bold text-sm font-mono">{selectedCandidate.boltz_affinity_score ?? "9.35"}</strong>
+                          {selectedCandidate.boltz_affinity_score != null ? (
+                            <strong className="text-emerald-400 font-bold text-sm font-mono">{selectedCandidate.boltz_affinity_score}</strong>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded text-[11px] font-mono border text-amber-400 bg-amber-950/40 border-amber-800/50">{selectedCandidate.boltz_status || "NOT INSTALLED"}</span>
+                          )}
                         </div>
 
                         <div className="flex justify-between items-center py-1 border-b border-slate-900">
                           <span className="text-slate-400">Complex Confidence (pLDDT):</span>
-                          <strong className="text-slate-200 font-bold font-mono">{selectedCandidate.boltz_confidence ?? "89.4"}%</strong>
+                          {selectedCandidate.boltz_confidence != null ? (
+                            <strong className="text-slate-200 font-bold font-mono">{selectedCandidate.boltz_confidence}%</strong>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded text-[11px] font-mono border text-slate-400 bg-slate-900 border-slate-800">NOT AVAILABLE</span>
+                          )}
                         </div>
 
                         <div className="flex justify-between items-center py-1 border-b border-slate-900">
                           <span className="text-slate-400">GNINA CNN Affinity:</span>
-                          <strong className="text-teal-400 font-bold font-mono">{selectedCandidate.gnina_docking_score ?? "-10.8"} kcal/mol</strong>
+                          {selectedCandidate.gnina_docking_score != null ? (
+                            <strong className="text-teal-400 font-bold font-mono">{selectedCandidate.gnina_docking_score} kcal/mol</strong>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded text-[11px] font-mono border text-amber-400 bg-amber-950/40 border-amber-800/50">{selectedCandidate.gnina_status || "NOT INSTALLED"}</span>
+                          )}
                         </div>
 
                         <div className="flex justify-between items-center py-1 border-b border-slate-900">
                           <span className="text-slate-400">Pose Agreement:</span>
-                          <span className="px-2 py-0.5 rounded text-[11px] font-mono border text-emerald-400 bg-emerald-950/40 border-emerald-800/50">
-                            {selectedCandidate.pose_agreement || "MULTI_MODEL_COMPLETED"}
-                          </span>
+                          {selectedCandidate.pose_agreement ? (
+                            <span className="px-2 py-0.5 rounded text-[11px] font-mono border text-emerald-400 bg-emerald-950/40 border-emerald-800/50">
+                              {selectedCandidate.pose_agreement}
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded text-[11px] font-mono border text-slate-400 bg-slate-900 border-slate-800">NOT AVAILABLE</span>
+                          )}
                         </div>
 
                         <div className="flex justify-between items-center py-1">
                           <span className="text-slate-400">Crop Selectivity Index:</span>
-                          <strong className="text-emerald-400 font-bold text-sm font-mono">{selectedCandidate.crop_selectivity_score ?? 94}/100</strong>
+                          {selectedCandidate.crop_selectivity_score != null ? (
+                            <strong className="text-emerald-400 font-bold text-sm font-mono">{selectedCandidate.crop_selectivity_score}/100</strong>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded text-[11px] font-mono border text-slate-400 bg-slate-900 border-slate-800">NOT AVAILABLE</span>
+                          )}
                         </div>
                       </div>
 
@@ -993,7 +1013,7 @@ export default function App() {
                         ))}
                       </div>
                     </div>
-                    <ProteinViewer3D pdbId="1YI2" height="340px" styleMode={viewerStyle} />
+                    <ProteinViewer3D targetId={selectedTarget.id} uniprotId={selectedTarget.uniprot_id} height="340px" styleMode={viewerStyle} />
                     
                     <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs font-mono space-y-2">
                       <div className="text-slate-400 font-sans font-bold">Weed Target Sequence Fragment:</div>
