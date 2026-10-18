@@ -2,7 +2,7 @@ import datetime
 import os
 import json
 from typing import List, Optional, Dict, Any
-from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
@@ -226,6 +226,44 @@ def get_project_targets(
         raise HTTPException(status_code=404, detail="Project not found")
     verify_project_ownership(proj, current_user)
     return db.query(TargetProtein).filter_by(project_id=project_id).all()
+
+@app.get("/api/v1/targets/{target_id}", response_model=TargetProteinResponse)
+def get_target_detail(
+    target_id: int,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    target = db.query(TargetProtein).filter_by(id=target_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Target not found")
+    if target.project:
+        verify_project_ownership(target.project, current_user)
+    return target
+
+@app.get("/api/v1/targets/{target_id}/pdb")
+def get_target_pdb(
+    target_id: int,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    target = db.query(TargetProtein).filter_by(id=target_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Target not found")
+    if target.project:
+        verify_project_ownership(target.project, current_user)
+    if not target.pdb_id or not os.path.exists(target.pdb_id):
+        raise HTTPException(status_code=404, detail="PDB structure file not found for target")
+
+    # Path containment validation to prevent arbitrary file access
+    real_path = os.path.realpath(target.pdb_id)
+    allowed_dir = os.path.realpath("./data/structures")
+    tmp_dir = os.path.realpath(os.environ.get("TMPDIR", "/tmp"))
+    if not (real_path.startswith(allowed_dir) or real_path.startswith(tmp_dir)):
+        raise HTTPException(status_code=403, detail="Access to specified PDB file path is forbidden")
+
+    with open(real_path, "r") as f:
+        pdb_content = f.read()
+    return Response(content=pdb_content, media_type="text/plain")
 
 # ---------------- Molecular Generation Endpoints ----------------
 
